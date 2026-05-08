@@ -2,12 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"dotty/internal/dotty"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func TestAddPrintsTargetToPackageSource(t *testing.T) {
@@ -277,7 +282,13 @@ links = [
 	if err := os.WriteFile(filepath.Join(repo, "zsh", ".zshrc"), []byte("export EDITOR=vim\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(repo, "zsh", ".zprofile"), []byte("export PATH\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(repo, "tmux"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "ghostty"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join(repo, "zsh", ".zshrc"), filepath.Join(home, ".zshrc")); err != nil {
@@ -288,18 +299,41 @@ links = [
 	if err != nil {
 		t.Fatalf("status failed: %v\nstderr: %s", err, errOut)
 	}
-	requireOutputContains(t, out, "zsh")
-	requireOutputContains(t, out, "LINKED")
-	requireOutputContains(t, out, "tmux")
-	requireOutputContains(t, out, "UNLINKED")
+	want := fmt.Sprintf("%-24s %s\n%-24s %s\n\n%s\n  %s\n  %s\n", "tmux", "UNLINKED", "zsh", "LINKED", "UNTRACKED", "ghostty", "zsh/.zprofile")
+	if out != want {
+		t.Fatalf("unexpected status output\nwant:\n%s\ngot:\n%s", want, out)
+	}
 
 	out, errOut, err = executeCommand("--repo", repo, "status", "--verbose")
 	if err != nil {
 		t.Fatalf("status --verbose failed: %v\nstderr: %s", err, errOut)
 	}
-	requireOutputContains(t, out, ".zshrc")
-	requireOutputContains(t, out, "~/.zshrc")
-	requireOutputContains(t, out, "LINKED")
+	want = fmt.Sprintf("%-18s %-20s %-36s %s\n%-18s %-20s %-36s %s\n\n%-18s %-20s %-36s %s\n%-18s %-20s %-36s %s\n", "tmux", ".", "~/.config/tmux", "UNLINKED", "zsh", ".zshrc", "~/.zshrc", "LINKED", "-", "ghostty", "-", "UNTRACKED", "-", "zsh/.zprofile", "-", "UNTRACKED")
+	if out != want {
+		t.Fatalf("unexpected verbose status output\nwant:\n%s\ngot:\n%s", want, out)
+	}
+}
+
+func TestStatusRenderingKeepsLipglossStylesWithoutBorders(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
+
+	var out bytes.Buffer
+	renderStatus(&out, &dotty.StatusReport{
+		Packages:  []dotty.PackageStatus{{Name: "tmux", State: dotty.StateLinked}},
+		Untracked: []dotty.UntrackedItem{{Path: "ghostty", State: dotty.StateUntracked}},
+	}, false)
+	got := out.String()
+
+	if strings.ContainsAny(got, "┌┬┐├┼┤└┴┘│─") {
+		t.Fatalf("expected no table borders, got %q", got)
+	}
+	for _, want := range []string{"\x1b[1;36mtmux", "\x1b[1;32mLINKED", "\x1b[34mghostty", "\x1b[1;34mUNTRACKED"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected styled output to contain %q, got %q", want, got)
+		}
+	}
 }
 
 func TestLinkCollectionPrintsAndCreatesLinks(t *testing.T) {
@@ -550,9 +584,10 @@ func assertSymlink(t *testing.T, linkPath, wantTarget string) {
 }
 
 func stripANSI(s string) string {
-	replacer := strings.NewReplacer("\x1b[1;32m", "", "\x1b[1;36m", "", "\x1b[35m", "", "\x1b[34m", "", "\x1b[0m", "")
-	return replacer.Replace(s)
+	return ansiPattern.ReplaceAllString(s, "")
 }
+
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func requireOutputContains(t *testing.T, output, want string) {
 	t.Helper()

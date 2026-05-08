@@ -62,7 +62,8 @@ func renderStatus(out io.Writer, report *dotty.StatusReport, verbose bool) {
 		return
 	}
 	for _, pkg := range report.Packages {
-		fmt.Fprintf(out, "%-24s %s\n", packageStyle.Render(pkg.Name), renderState(pkg.State))
+		renderPadded(out, pkg.Name, packageStyle, 24)
+		fmt.Fprintf(out, " %s\n", renderState(pkg.State))
 	}
 	if len(report.Untracked) > 0 {
 		if len(report.Packages) > 0 {
@@ -78,11 +79,11 @@ func renderStatus(out io.Writer, report *dotty.StatusReport, verbose bool) {
 func renderVerboseStatus(out io.Writer, report *dotty.StatusReport) {
 	for _, pkg := range report.Packages {
 		if len(pkg.Entries) == 0 {
-			fmt.Fprintf(out, "%-18s %-20s %-36s %s\n", packageStyle.Render(pkg.Name), mutedStyle.Render("-"), mutedStyle.Render("-"), renderState(pkg.State))
+			renderVerboseStatusRow(out, pkg.Name, "-", "-", pkg.State)
 			continue
 		}
 		for _, entry := range pkg.Entries {
-			fmt.Fprintf(out, "%-18s %-20s %-36s %s\n", packageStyle.Render(entry.Package), sourceStyle.Render(entry.Source), pathStyle.Render(entry.Target), renderState(entry.State))
+			renderVerboseStatusRow(out, entry.Package, entry.Source, entry.Target, entry.State)
 		}
 	}
 	if len(report.Untracked) > 0 {
@@ -90,8 +91,33 @@ func renderVerboseStatus(out io.Writer, report *dotty.StatusReport) {
 			fmt.Fprintln(out)
 		}
 		for _, item := range report.Untracked {
-			fmt.Fprintf(out, "%-18s %-20s %-36s %s\n", mutedStyle.Render("-"), sourceStyle.Render(item.Path), mutedStyle.Render("-"), renderState(dotty.StateUntracked))
+			renderVerboseUntrackedRow(out, item.Path, item.State)
 		}
+	}
+}
+
+func renderVerboseStatusRow(out io.Writer, packageName, source, target string, state dotty.State) {
+	renderPadded(out, packageName, packageStyle, 18)
+	fmt.Fprint(out, " ")
+	renderPadded(out, source, sourceStyle, 20)
+	fmt.Fprint(out, " ")
+	renderPadded(out, target, pathStyle, 36)
+	fmt.Fprintf(out, " %s\n", renderState(state))
+}
+
+func renderVerboseUntrackedRow(out io.Writer, path string, state dotty.State) {
+	renderPadded(out, "-", mutedStyle, 18)
+	fmt.Fprint(out, " ")
+	renderPadded(out, path, sourceStyle, 20)
+	fmt.Fprint(out, " ")
+	renderPadded(out, "-", mutedStyle, 36)
+	fmt.Fprintf(out, " %s\n", renderState(state))
+}
+
+func renderPadded(out io.Writer, text string, style lipgloss.Style, width int) {
+	fmt.Fprint(out, style.Render(text))
+	if padding := width - lipgloss.Width(text); padding > 0 {
+		fmt.Fprint(out, strings.Repeat(" ", padding))
 	}
 }
 
