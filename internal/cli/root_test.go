@@ -96,6 +96,188 @@ links = [
 	}
 }
 
+func TestInitPrintsRepositoryPathAndStoresDefaultRepository(t *testing.T) {
+	home := setupCLIHomeOnly(t)
+	repo := filepath.Join(home, "dotfiles")
+
+	out, errOut, err := executeCommand("init", repo)
+	if err != nil {
+		t.Fatalf("init failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "initialized " + repo + "\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+	cfg, err := dotty.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Repo != "~/dotfiles" {
+		t.Fatalf("default repository mismatch: want ~/dotfiles, got %s", cfg.Repo)
+	}
+}
+
+func TestListPrintsPackagesAndCollections(t *testing.T) {
+	_, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+  { source = ".zprofile", target = "~/.zprofile" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[collections.terminal]
+packages = ["tmux", "zsh"]
+`)
+
+	out, errOut, err := executeCommand("--repo", repo, "list")
+	if err != nil {
+		t.Fatalf("list failed: %v\nstderr: %s", err, errOut)
+	}
+
+	requireOutputContains(t, out, "Packages\n")
+	requireOutputContains(t, out, "tmux")
+	requireOutputContains(t, out, "1 link")
+	requireOutputContains(t, out, "zsh")
+	requireOutputContains(t, out, "2 links")
+	requireOutputContains(t, out, "Collections\n")
+	requireOutputContains(t, out, "terminal")
+	requireOutputContains(t, out, "tmux, zsh")
+}
+
+func TestStatusPrintsPackageSummariesAndVerboseEntries(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
+	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "zsh", ".zshrc"), []byte("export EDITOR=vim\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "tmux"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(repo, "zsh", ".zshrc"), filepath.Join(home, ".zshrc")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, err := executeCommand("--repo", repo, "status")
+	if err != nil {
+		t.Fatalf("status failed: %v\nstderr: %s", err, errOut)
+	}
+	requireOutputContains(t, out, "zsh")
+	requireOutputContains(t, out, "LINKED")
+	requireOutputContains(t, out, "tmux")
+	requireOutputContains(t, out, "UNLINKED")
+
+	out, errOut, err = executeCommand("--repo", repo, "status", "--verbose")
+	if err != nil {
+		t.Fatalf("status --verbose failed: %v\nstderr: %s", err, errOut)
+	}
+	requireOutputContains(t, out, ".zshrc")
+	requireOutputContains(t, out, "~/.zshrc")
+	requireOutputContains(t, out, "LINKED")
+}
+
+func TestLinkCollectionPrintsAndCreatesLinks(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[collections.terminal]
+packages = ["tmux", "zsh"]
+`)
+	if err := os.MkdirAll(filepath.Join(repo, "tmux"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "zsh", ".zshrc"), []byte("export EDITOR=vim\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, err := executeCommand("--repo", repo, "link", "--collection", "terminal")
+	if err != nil {
+		t.Fatalf("link collection failed: %v\nstderr: %s", err, errOut)
+	}
+	requireOutputContains(t, out, "linked tmux")
+	requireOutputContains(t, out, "linked zsh")
+	assertSymlink(t, filepath.Join(home, ".config", "tmux"), filepath.Join(repo, "tmux"))
+	assertSymlink(t, filepath.Join(home, ".zshrc"), filepath.Join(repo, "zsh", ".zshrc"))
+}
+
+func TestUnlinkHardPrintsLinkRemoved(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	if err := os.WriteFile(source, []byte("export EDITOR=vim\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, filepath.Join(home, ".zshrc")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, err := executeCommand("--repo", repo, "unlink", "--hard", "zsh")
+	if err != nil {
+		t.Fatalf("unlink --hard failed: %v\nstderr: %s", err, errOut)
+	}
+	want := "hard-unlinked zsh: ~/.zshrc (link removed)\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+}
+
+func TestCommandReturnsCoreErrors(t *testing.T) {
+	_, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = []
+`)
+
+	_, _, err := executeCommand("--repo", repo, "link", "tmux")
+	if err == nil || !strings.Contains(err.Error(), "unknown package") {
+		t.Fatalf("expected unknown package error, got %v", err)
+	}
+}
+
 func setupCLITest(t *testing.T) (home string, repo string) {
 	t.Helper()
 	home = filepath.Join(t.TempDir(), "home")
@@ -110,6 +292,18 @@ func setupCLITest(t *testing.T) (home string, repo string) {
 		t.Fatal(err)
 	}
 	return home, repo
+}
+
+func setupCLIHomeOnly(t *testing.T) string {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), "home")
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("DOTTY_REPO", "")
+	return home
 }
 
 func executeCommand(args ...string) (stdout string, stderr string, err error) {
@@ -142,4 +336,11 @@ func assertSymlink(t *testing.T, linkPath, wantTarget string) {
 func stripANSI(s string) string {
 	replacer := strings.NewReplacer("\x1b[1;32m", "", "\x1b[1;36m", "", "\x1b[35m", "", "\x1b[34m", "", "\x1b[0m", "")
 	return replacer.Replace(s)
+}
+
+func requireOutputContains(t *testing.T, output, want string) {
+	t.Helper()
+	if !strings.Contains(output, want) {
+		t.Fatalf("expected output to contain %q, got %q", want, output)
+	}
 }

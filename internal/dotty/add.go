@@ -71,7 +71,11 @@ func (s Service) Add(targetInput, packageName string) (*AddResult, error) {
 			}
 		} else {
 			if symlinkAdoption {
-				if isWithin(s.Repo, adoptPath) {
+				repoResolved, err := filepath.EvalSymlinks(s.Repo)
+				if err != nil {
+					return fmt.Errorf("resolve dotfiles repository %s: %w", s.Repo, err)
+				}
+				if isWithin(repoResolved, adoptPath) {
 					return fmt.Errorf("symlink target %s is inside the dotfiles repository but is not the intended package source %s", adoptPath, dest)
 				}
 				if err := CopyPathTx(tx, adoptPath, dest); err != nil {

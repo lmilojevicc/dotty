@@ -149,8 +149,14 @@ func CopyPathTx(tx *Tx, src, dst string) error {
 	if err := EnsureDirTx(tx, dirOf(dst), 0o755); err != nil {
 		return err
 	}
+	dstExisted, err := pathExists(dst)
+	if err != nil {
+		return err
+	}
 	if err := copyPath(src, dst); err != nil {
-		_ = os.RemoveAll(dst)
+		if !dstExisted {
+			_ = os.RemoveAll(dst)
+		}
 		return err
 	}
 	tx.AddRollback(func() error {
