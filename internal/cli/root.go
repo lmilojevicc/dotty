@@ -63,7 +63,8 @@ func (a *app) initCommand() *cobra.Command {
 }
 
 func (a *app) addCommand() *cobra.Command {
-	return &cobra.Command{
+	var dryRun bool
+	cmd := &cobra.Command{
 		Use:   "add PATH PACKAGE",
 		Short: "Adopt an existing file, directory, or symlink target into a package",
 		Args:  cobra.ExactArgs(2),
@@ -72,7 +73,7 @@ func (a *app) addCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := svc.Add(args[0], args[1])
+			result, err := svc.AddWithOptions(dotty.AddOptions{Target: args[0], Package: args[1], DryRun: dryRun})
 			if err != nil {
 				return err
 			}
@@ -80,12 +81,15 @@ func (a *app) addCommand() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
+	return cmd
 }
 
 func (a *app) linkCommand() *cobra.Command {
 	var collections []string
 	var all bool
 	var force bool
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "link [packages...]",
 		Short: "Create links for packages, all packages, or an explicit collection",
@@ -95,7 +99,7 @@ func (a *app) linkCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			linked, err := svc.Link(dotty.LinkOptions{Packages: args, Collections: collections, All: all, Force: force})
+			linked, err := svc.Link(dotty.LinkOptions{Packages: args, Collections: collections, All: all, Force: force, DryRun: dryRun})
 			if err != nil {
 				return err
 			}
@@ -106,6 +110,7 @@ func (a *app) linkCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&all, "all", false, "link all packages")
 	cmd.Flags().StringArrayVarP(&collections, "collection", "c", nil, "collection to link (can be repeated)")
 	cmd.Flags().BoolVar(&force, "force", false, "destructively replace target conflicts")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
 	return cmd
 }
 
@@ -113,6 +118,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 	var collections []string
 	var all bool
 	var hard bool
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "unlink [packages...]",
 		Short: "Remove links for packages, all packages, or an explicit collection",
@@ -122,7 +128,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			unlinked, err := svc.Unlink(dotty.UnlinkOptions{Packages: args, Collections: collections, All: all, Hard: hard})
+			unlinked, err := svc.Unlink(dotty.UnlinkOptions{Packages: args, Collections: collections, All: all, Hard: hard, DryRun: dryRun})
 			if err != nil {
 				return err
 			}
@@ -133,6 +139,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&all, "all", false, "unlink all packages")
 	cmd.Flags().StringArrayVarP(&collections, "collection", "c", nil, "collection to unlink (can be repeated)")
 	cmd.Flags().BoolVar(&hard, "hard", false, "remove expected links without leaving target-side copies")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
 	return cmd
 }
 

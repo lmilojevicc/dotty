@@ -31,6 +31,44 @@ func TestAddPrintsTargetToPackageSource(t *testing.T) {
 	}
 }
 
+func TestAddDryRunPrintsWouldAddAndDoesNotChangeFilesystem(t *testing.T) {
+	home, repo := setupCLITest(t)
+	target := filepath.Join(home, ".config", "tmux")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "tmux.conf"), []byte("set -g mouse on\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestBefore, err := os.ReadFile(dotty.ManifestPath(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, err := executeCommand("--repo", repo, "add", "--dry-run", target, "tmux")
+	if err != nil {
+		t.Fatalf("add --dry-run failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "would add tmux: ~/.config/tmux -> ~/dotfiles/tmux\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+	if _, err := os.Stat(filepath.Join(target, "tmux.conf")); err != nil {
+		t.Fatalf("target content changed: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(repo, "tmux")); err == nil || !os.IsNotExist(err) {
+		t.Fatalf("dry-run created package source: %v", err)
+	}
+	manifestAfter, err := os.ReadFile(dotty.ManifestPath(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(manifestAfter) != string(manifestBefore) {
+		t.Fatalf("manifest changed\nbefore: %q\nafter:  %q", string(manifestBefore), string(manifestAfter))
+	}
+}
+
 func TestLinkPrintsEachCreatedLink(t *testing.T) {
 	home, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
@@ -65,6 +103,40 @@ links = [
 	assertSymlink(t, filepath.Join(home, "secrets", ".zshrc_secrets"), filepath.Join(repo, "zsh", ".zshrc_secrets"))
 }
 
+func TestLinkDryRunPrintsWouldLinkAndDoesNotReplaceConflict(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "zsh", ".zshrc"), []byte("export EDITOR=vim\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".zshrc")
+	if err := os.WriteFile(target, []byte("local copy\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, err := executeCommand("--repo", repo, "link", "--force", "--dry-run", "zsh")
+	if err != nil {
+		t.Fatalf("link --dry-run failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "would link zsh: ~/.zshrc -> ~/dotfiles/zsh/.zshrc\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "local copy\n" {
+		t.Fatalf("target conflict changed: data=%q err=%v", string(data), err)
+	}
+}
+
 func TestUnlinkPrintsTargetAction(t *testing.T) {
 	home, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
@@ -94,6 +166,39 @@ links = [
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
+}
+
+func TestUnlinkDryRunPrintsWouldUnlinkAndLeavesLink(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	if err := os.WriteFile(source, []byte("export EDITOR=vim\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".zshrc")
+	if err := os.Symlink(source, target); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, err := executeCommand("--repo", repo, "unlink", "--dry-run", "zsh")
+	if err != nil {
+		t.Fatalf("unlink --dry-run failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "would unlink zsh: ~/.zshrc (copy left)\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+	assertSymlink(t, target, source)
 }
 
 func TestInitPrintsRepositoryPathAndStoresDefaultRepository(t *testing.T) {

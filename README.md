@@ -24,16 +24,21 @@ dotty init ~/dotfiles
 
 # Move ~/.config/tmux into ~/dotfiles/tmux and link it back
 dotty add ~/.config/tmux tmux
+dotty add --dry-run ~/.config/tmux tmux
 
 # Link or unlink packages
 dotty link tmux
+dotty link --dry-run tmux
 dotty unlink tmux          # leaves a copy at the target path
+dotty unlink --dry-run tmux
 dotty unlink --hard tmux   # removes only expected Dotty symlinks
+dotty unlink --hard --dry-run tmux
 dotty link --all           # link every package in the manifest
 dotty unlink --all         # unlink every package in the manifest
 
 # Replace target conflicts explicitly
 dotty link --force tmux
+dotty link --force --dry-run tmux
 
 # Inspect manifest inventory vs filesystem state
 dotty list

@@ -260,6 +260,44 @@ func copyPath(src, dst string) error {
 	return copyFile(src, dst, mode.Perm())
 }
 
+func validateCopyablePath(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect %s: %w", path, err)
+	}
+
+	mode := info.Mode()
+	if mode&os.ModeSymlink != 0 {
+		if _, err := os.Readlink(path); err != nil {
+			return fmt.Errorf("read symlink %s: %w", path, err)
+		}
+		return nil
+	}
+	if info.IsDir() {
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return fmt.Errorf("read directory %s: %w", path, err)
+		}
+		for _, entry := range entries {
+			if err := validateCopyablePath(filepath.Join(path, entry.Name())); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if !mode.IsRegular() {
+		return fmt.Errorf("unsupported file type at %s", path)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", path, err)
+	}
+	return nil
+}
+
 func copyFile(src, dst string, perm os.FileMode) error {
 	in, err := os.Open(src)
 	if err != nil {
