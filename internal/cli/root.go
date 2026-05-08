@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"dotty/internal/dotty"
 
@@ -77,7 +76,7 @@ func (a *app) addCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(a.out, "%s %s %s %s\n", successStyle.Render("added"), packageStyle.Render(result.Package), sourceStyle.Render(result.Source), pathStyle.Render(result.Target))
+			renderAddResult(a.out, result)
 			return nil
 		},
 	}
@@ -99,7 +98,7 @@ func (a *app) linkCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(a.out, "%s %s\n", successStyle.Render("linked"), strings.Join(linked, ", "))
+			renderLinkResults(a.out, linked)
 			return nil
 		},
 	}
@@ -124,11 +123,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			verb := "unlinked"
-			if hard {
-				verb = "hard-unlinked"
-			}
-			fmt.Fprintf(a.out, "%s %s\n", successStyle.Render(verb), strings.Join(unlinked, ", "))
+			renderUnlinkResults(a.out, unlinked)
 			return nil
 		},
 	}

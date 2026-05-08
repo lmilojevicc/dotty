@@ -7,9 +7,10 @@ import (
 )
 
 type AddResult struct {
-	Package string
-	Source  string
-	Target  string
+	Package    string
+	Source     string
+	SourcePath string
+	Target     string
 }
 
 func (s Service) Add(targetInput, packageName string) (*AddResult, error) {
@@ -110,7 +111,7 @@ func (s Service) Add(targetInput, packageName string) (*AddResult, error) {
 			return err
 		}
 
-		result = AddResult{Package: packageName, Source: filepath.ToSlash(sourceRel), Target: storedTarget}
+		result = AddResult{Package: packageName, Source: filepath.ToSlash(sourceRel), SourcePath: HomeRelative(dest), Target: storedTarget}
 		return nil
 	}); err != nil {
 		return nil, err

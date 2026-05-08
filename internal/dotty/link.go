@@ -11,8 +11,14 @@ type LinkOptions struct {
 	Force       bool
 }
 
-func (s Service) Link(options LinkOptions) ([]string, error) {
-	var linked []string
+type LinkResult struct {
+	Package    string
+	Target     string
+	SourcePath string
+}
+
+func (s Service) Link(options LinkOptions) ([]LinkResult, error) {
+	var linked []LinkResult
 	if err := RunAtomic(func(tx *Tx) error {
 		manifest, err := LoadManifest(s.Repo)
 		if err != nil {
@@ -25,12 +31,13 @@ func (s Service) Link(options LinkOptions) ([]string, error) {
 		for _, packageName := range selected {
 			pkg := manifest.Packages[packageName]
 			for _, mapping := range pkg.Links {
-				if err := s.linkMapping(tx, packageName, mapping, options.Force); err != nil {
+				result, err := s.linkMapping(tx, packageName, mapping, options.Force)
+				if err != nil {
 					return err
 				}
+				linked = append(linked, result)
 			}
 		}
-		linked = selected
 		return nil
 	}); err != nil {
 		return nil, err
@@ -38,19 +45,21 @@ func (s Service) Link(options LinkOptions) ([]string, error) {
 	return linked, nil
 }
 
-func (s Service) linkMapping(tx *Tx, packageName string, mapping LinkMapping, force bool) error {
+func (s Service) linkMapping(tx *Tx, packageName string, mapping LinkMapping, force bool) (LinkResult, error) {
+	result := LinkResult{Package: packageName, Target: mapping.Target}
 	sourceAbs, err := PackageSourcePath(s.Repo, packageName, mapping.Source)
 	if err != nil {
-		return err
+		return result, err
 	}
+	result.SourcePath = HomeRelative(sourceAbs)
 	if exists, err := pathExists(sourceAbs); err != nil {
-		return err
+		return result, err
 	} else if !exists {
-		return fmt.Errorf("package %q source %q is missing", packageName, mapping.Source)
+		return result, fmt.Errorf("package %q source %q is missing", packageName, mapping.Source)
 	}
 	targetAbs, err := ExpandTargetPath(mapping.Target)
 	if err != nil {
-		return err
+		return result, err
 	}
 
 	info, err := os.Lstat(targetAbs)
@@ -59,28 +68,28 @@ func (s Service) linkMapping(tx *Tx, packageName string, mapping LinkMapping, fo
 			if symlinkPointsTo(targetAbs, sourceAbs) {
 				targetText, _ := os.Readlink(targetAbs)
 				if targetText == sourceAbs {
-					return nil
+					return result, nil
 				}
 				if err := RemoveSymlinkTx(tx, targetAbs); err != nil {
-					return err
+					return result, err
 				}
 			} else if force {
 				if err := MoveAsideTx(tx, targetAbs); err != nil {
-					return err
+					return result, err
 				}
 			} else {
-				return fmt.Errorf("target %s is a symlink to another source", targetAbs)
+				return result, fmt.Errorf("target %s is a symlink to another source", targetAbs)
 			}
 		} else if force {
 			if err := MoveAsideTx(tx, targetAbs); err != nil {
-				return err
+				return result, err
 			}
 		} else {
-			return fmt.Errorf("target %s already exists", targetAbs)
+			return result, fmt.Errorf("target %s already exists", targetAbs)
 		}
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("inspect target %s: %w", targetAbs, err)
+		return result, fmt.Errorf("inspect target %s: %w", targetAbs, err)
 	}
 
-	return CreateSymlinkTx(tx, sourceAbs, targetAbs)
+	return result, CreateSymlinkTx(tx, sourceAbs, targetAbs)
 }

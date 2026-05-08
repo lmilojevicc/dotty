@@ -11,8 +11,14 @@ type UnlinkOptions struct {
 	Hard        bool
 }
 
-func (s Service) Unlink(options UnlinkOptions) ([]string, error) {
-	var unlinked []string
+type UnlinkResult struct {
+	Package string
+	Target  string
+	Hard    bool
+}
+
+func (s Service) Unlink(options UnlinkOptions) ([]UnlinkResult, error) {
+	var unlinked []UnlinkResult
 	if err := RunAtomic(func(tx *Tx) error {
 		manifest, err := LoadManifest(s.Repo)
 		if err != nil {
@@ -25,12 +31,13 @@ func (s Service) Unlink(options UnlinkOptions) ([]string, error) {
 		for _, packageName := range selected {
 			pkg := manifest.Packages[packageName]
 			for _, mapping := range pkg.Links {
-				if err := s.unlinkMapping(tx, packageName, mapping, options.Hard); err != nil {
+				result, err := s.unlinkMapping(tx, packageName, mapping, options.Hard)
+				if err != nil {
 					return err
 				}
+				unlinked = append(unlinked, result)
 			}
 		}
-		unlinked = selected
 		return nil
 	}); err != nil {
 		return nil, err
@@ -38,40 +45,41 @@ func (s Service) Unlink(options UnlinkOptions) ([]string, error) {
 	return unlinked, nil
 }
 
-func (s Service) unlinkMapping(tx *Tx, packageName string, mapping LinkMapping, hard bool) error {
+func (s Service) unlinkMapping(tx *Tx, packageName string, mapping LinkMapping, hard bool) (UnlinkResult, error) {
+	result := UnlinkResult{Package: packageName, Target: mapping.Target, Hard: hard}
 	sourceAbs, err := PackageSourcePath(s.Repo, packageName, mapping.Source)
 	if err != nil {
-		return err
+		return result, err
 	}
 	targetAbs, err := ExpandTargetPath(mapping.Target)
 	if err != nil {
-		return err
+		return result, err
 	}
 
 	info, err := os.Lstat(targetAbs)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return result, nil
 		}
-		return fmt.Errorf("inspect target %s: %w", targetAbs, err)
+		return result, fmt.Errorf("inspect target %s: %w", targetAbs, err)
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
-		return fmt.Errorf("target %s is not an expected dotty link", targetAbs)
+		return result, fmt.Errorf("target %s is not an expected dotty link", targetAbs)
 	}
 	if !symlinkPointsTo(targetAbs, sourceAbs) {
-		return fmt.Errorf("target %s is a symlink to another source", targetAbs)
+		return result, fmt.Errorf("target %s is a symlink to another source", targetAbs)
 	}
 
 	if hard {
-		return RemoveSymlinkTx(tx, targetAbs)
+		return result, RemoveSymlinkTx(tx, targetAbs)
 	}
 	if exists, err := pathExists(sourceAbs); err != nil {
-		return err
+		return result, err
 	} else if !exists {
-		return fmt.Errorf("package %q source %q is missing", packageName, mapping.Source)
+		return result, fmt.Errorf("package %q source %q is missing", packageName, mapping.Source)
 	}
 	if err := RemoveSymlinkTx(tx, targetAbs); err != nil {
-		return err
+		return result, err
 	}
-	return CopyPathTx(tx, sourceAbs, targetAbs)
+	return result, CopyPathTx(tx, sourceAbs, targetAbs)
 }

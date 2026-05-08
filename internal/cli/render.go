@@ -20,6 +20,28 @@ var stateStyles = map[dotty.State]lipgloss.Style{
 	dotty.StateUntracked:     lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true),
 }
 
+func renderAddResult(out io.Writer, result *dotty.AddResult) {
+	fmt.Fprintf(out, "%s %s: %s -> %s\n", successStyle.Render("added"), packageStyle.Render(result.Package), pathStyle.Render(result.Target), pathStyle.Render(result.SourcePath))
+}
+
+func renderLinkResults(out io.Writer, results []dotty.LinkResult) {
+	for _, result := range results {
+		fmt.Fprintf(out, "%s %s: %s -> %s\n", successStyle.Render("linked"), packageStyle.Render(result.Package), pathStyle.Render(result.Target), pathStyle.Render(result.SourcePath))
+	}
+}
+
+func renderUnlinkResults(out io.Writer, results []dotty.UnlinkResult) {
+	for _, result := range results {
+		verb := "unlinked"
+		note := "copy left"
+		if result.Hard {
+			verb = "hard-unlinked"
+			note = "link removed"
+		}
+		fmt.Fprintf(out, "%s %s: %s (%s)\n", successStyle.Render(verb), packageStyle.Render(result.Package), pathStyle.Render(result.Target), mutedStyle.Render(note))
+	}
+}
+
 func renderStatus(out io.Writer, report *dotty.StatusReport, verbose bool) {
 	if verbose {
 		renderVerboseStatus(out, report)
