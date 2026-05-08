@@ -5,7 +5,7 @@ Dotty is a Go dotfiles manager. It stores packages in a dotfiles repository and 
 ## Install / run
 
 ```bash
-go build -o dotty .
+go build -o dotty ./cmd/dotty
 ./dotty --help
 ```
 
