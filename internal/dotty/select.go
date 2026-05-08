@@ -2,8 +2,14 @@ package dotty
 
 import "fmt"
 
-func ResolvePackageSelection(manifest *Manifest, packages []string, collections []string) ([]string, error) {
+func ResolvePackageSelection(manifest *Manifest, packages []string, collections []string, all bool) ([]string, error) {
 	manifest.normalize()
+	if all {
+		if len(packages) > 0 || len(collections) > 0 {
+			return nil, fmt.Errorf("--all cannot be combined with packages or collections")
+		}
+		return sortedKeys(manifest.Packages), nil
+	}
 	if len(packages) == 0 && len(collections) == 0 {
 		return nil, fmt.Errorf("select at least one package or collection")
 	}

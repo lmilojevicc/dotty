@@ -29,6 +29,8 @@ dotty add ~/.config/tmux tmux
 dotty link tmux
 dotty unlink tmux          # leaves a copy at the target path
 dotty unlink --hard tmux   # removes only expected Dotty symlinks
+dotty link --all           # link every package in the manifest
+dotty unlink --all         # unlink every package in the manifest
 
 # Replace target conflicts explicitly
 dotty link --force tmux
@@ -65,6 +67,8 @@ Collections are explicit user-defined package lists:
 dotty link --collection terminal
 dotty unlink --collection terminal
 ```
+
+`--all` cannot be combined with package names or `--collection`.
 
 ## Stow-style migration
 

@@ -136,7 +136,7 @@ _Avoid_: transaction, all-or-nothing filesystem write
 - **List** reports manifest inventory; status reports filesystem state.
 - **Init** does not overwrite existing package content or an existing **Manifest**.
 - **Add**, **Unlink**, and **Hard Unlink** operate on **Packages** and their **Links**.
-- Link and unlink commands operate on **Packages** by default and on **Collections** when the user provides an explicit collection option.
+- Link and unlink commands operate on explicitly selected **Packages**, on all **Packages** when the user provides an explicit all option, and on **Collections** when the user provides an explicit collection option.
 - **Add**, **Unlink**, **Hard Unlink**, and link creation are **Atomic Operations**.
 - **Hard Unlink** does not delete target-side files or directories that are not the expected Dotty **Links**.
 - Adding a directory as a new **Package** uses the **Package Root** as the **Package Source**.

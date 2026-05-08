@@ -180,6 +180,33 @@ links = [
 	requireNoPath(t, filepath.Join(home, ".zshrc"))
 }
 
+func TestLinkAllLinksEveryPackageAndBareLinkRequiresSelection(t *testing.T) {
+	home, repo := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux"), 0o755))
+	svc := NewService(repo)
+
+	_, err := svc.Link(LinkOptions{})
+	requireErrorContains(t, err, "select at least one package or collection")
+
+	results, err := svc.Link(LinkOptions{All: true})
+	requireNoError(t, err)
+	requireResultPackages(t, results, []string{"tmux", "zsh"})
+	assertSymlink(t, filepath.Join(home, ".config", "tmux"), filepath.Join(repo, "tmux"))
+	assertSymlink(t, filepath.Join(home, ".zshrc"), filepath.Join(repo, "zsh", ".zshrc"))
+}
+
 func TestUnlinkHandlesAbsentTargetsAndHardUnlinkWithoutSource(t *testing.T) {
 	home, repo := setupLinkedPackageTest(t, `version = 1
 
@@ -202,6 +229,32 @@ links = [
 	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}, Hard: true})
 	requireNoError(t, err)
 	requireNoPath(t, target)
+}
+
+func TestUnlinkAllUnlinksEveryPackage(t *testing.T) {
+	home, repo := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux"), 0o755))
+	requireNoError(t, os.MkdirAll(filepath.Join(home, ".config"), 0o755))
+	requireNoError(t, os.Symlink(filepath.Join(repo, "tmux"), filepath.Join(home, ".config", "tmux")))
+	requireNoError(t, os.Symlink(filepath.Join(repo, "zsh", ".zshrc"), filepath.Join(home, ".zshrc")))
+
+	results, err := NewService(repo).Unlink(UnlinkOptions{All: true, Hard: true})
+	requireNoError(t, err)
+	requireUnlinkResultPackages(t, results, []string{"tmux", "zsh"})
+	requireNoPath(t, filepath.Join(home, ".config", "tmux"))
+	requireNoPath(t, filepath.Join(home, ".zshrc"))
 }
 
 func TestUnlinkRefusesConflictsAndWrongSymlinks(t *testing.T) {
@@ -263,4 +316,22 @@ func setupLinkedPackageTest(t *testing.T, manifest string) (home string, repo st
 	requireNoError(t, os.MkdirAll(repo, 0o755))
 	writeDottyManifest(t, repo, manifest)
 	return home, repo
+}
+
+func requireResultPackages(t *testing.T, results []LinkResult, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(results))
+	for _, result := range results {
+		got = append(got, result.Package)
+	}
+	requireEqualStrings(t, got, want)
+}
+
+func requireUnlinkResultPackages(t *testing.T, results []UnlinkResult, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(results))
+	for _, result := range results {
+		got = append(got, result.Package)
+	}
+	requireEqualStrings(t, got, want)
 }

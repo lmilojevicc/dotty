@@ -8,6 +8,7 @@ import (
 type LinkOptions struct {
 	Packages    []string
 	Collections []string
+	All         bool
 	Force       bool
 }
 
@@ -24,7 +25,7 @@ func (s Service) Link(options LinkOptions) ([]LinkResult, error) {
 		if err != nil {
 			return err
 		}
-		selected, err := ResolvePackageSelection(manifest, options.Packages, options.Collections)
+		selected, err := ResolvePackageSelection(manifest, options.Packages, options.Collections, options.All)
 		if err != nil {
 			return err
 		}

@@ -8,6 +8,7 @@ import (
 type UnlinkOptions struct {
 	Packages    []string
 	Collections []string
+	All         bool
 	Hard        bool
 }
 
@@ -24,7 +25,7 @@ func (s Service) Unlink(options UnlinkOptions) ([]UnlinkResult, error) {
 		if err != nil {
 			return err
 		}
-		selected, err := ResolvePackageSelection(manifest, options.Packages, options.Collections)
+		selected, err := ResolvePackageSelection(manifest, options.Packages, options.Collections, options.All)
 		if err != nil {
 			return err
 		}

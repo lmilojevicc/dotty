@@ -84,17 +84,18 @@ func (a *app) addCommand() *cobra.Command {
 
 func (a *app) linkCommand() *cobra.Command {
 	var collections []string
+	var all bool
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "link [packages...]",
-		Short: "Create links for packages or an explicit collection",
+		Short: "Create links for packages, all packages, or an explicit collection",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
 				return err
 			}
-			linked, err := svc.Link(dotty.LinkOptions{Packages: args, Collections: collections, Force: force})
+			linked, err := svc.Link(dotty.LinkOptions{Packages: args, Collections: collections, All: all, Force: force})
 			if err != nil {
 				return err
 			}
@@ -102,6 +103,7 @@ func (a *app) linkCommand() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&all, "all", false, "link all packages")
 	cmd.Flags().StringArrayVarP(&collections, "collection", "c", nil, "collection to link (can be repeated)")
 	cmd.Flags().BoolVar(&force, "force", false, "destructively replace target conflicts")
 	return cmd
@@ -109,17 +111,18 @@ func (a *app) linkCommand() *cobra.Command {
 
 func (a *app) unlinkCommand() *cobra.Command {
 	var collections []string
+	var all bool
 	var hard bool
 	cmd := &cobra.Command{
 		Use:   "unlink [packages...]",
-		Short: "Remove links for packages or an explicit collection",
+		Short: "Remove links for packages, all packages, or an explicit collection",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
 				return err
 			}
-			unlinked, err := svc.Unlink(dotty.UnlinkOptions{Packages: args, Collections: collections, Hard: hard})
+			unlinked, err := svc.Unlink(dotty.UnlinkOptions{Packages: args, Collections: collections, All: all, Hard: hard})
 			if err != nil {
 				return err
 			}
@@ -127,6 +130,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&all, "all", false, "unlink all packages")
 	cmd.Flags().StringArrayVarP(&collections, "collection", "c", nil, "collection to unlink (can be repeated)")
 	cmd.Flags().BoolVar(&hard, "hard", false, "remove expected links without leaving target-side copies")
 	return cmd

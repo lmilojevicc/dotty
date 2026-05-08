@@ -234,6 +234,43 @@ packages = ["tmux", "zsh"]
 	assertSymlink(t, filepath.Join(home, ".zshrc"), filepath.Join(repo, "zsh", ".zshrc"))
 }
 
+func TestLinkAllPrintsAndCreatesLinks(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
+	if err := os.MkdirAll(filepath.Join(repo, "tmux"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "zsh", ".zshrc"), []byte("export EDITOR=vim\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, err := executeCommand("--repo", repo, "link", "--all")
+	if err != nil {
+		t.Fatalf("link --all failed: %v\nstderr: %s", err, errOut)
+	}
+	want := "linked tmux: ~/.config/tmux -> ~/dotfiles/tmux\n" +
+		"linked zsh: ~/.zshrc -> ~/dotfiles/zsh/.zshrc\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+	assertSymlink(t, filepath.Join(home, ".config", "tmux"), filepath.Join(repo, "tmux"))
+	assertSymlink(t, filepath.Join(home, ".zshrc"), filepath.Join(repo, "zsh", ".zshrc"))
+}
+
 func TestUnlinkHardPrintsLinkRemoved(t *testing.T) {
 	home, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
@@ -264,17 +301,91 @@ links = [
 	}
 }
 
+func TestUnlinkAllPrintsAndLeavesCopies(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
+	tmuxSource := filepath.Join(repo, "tmux")
+	if err := os.MkdirAll(tmuxSource, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmuxSource, "tmux.conf"), []byte("set -g mouse on\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	zshSource := filepath.Join(repo, "zsh", ".zshrc")
+	if err := os.WriteFile(zshSource, []byte("export EDITOR=vim\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tmuxTarget := filepath.Join(home, ".config", "tmux")
+	if err := os.MkdirAll(filepath.Dir(tmuxTarget), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(tmuxSource, tmuxTarget); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(zshSource, filepath.Join(home, ".zshrc")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, err := executeCommand("--repo", repo, "unlink", "--all")
+	if err != nil {
+		t.Fatalf("unlink --all failed: %v\nstderr: %s", err, errOut)
+	}
+	want := "unlinked tmux: ~/.config/tmux (copy left)\n" +
+		"unlinked zsh: ~/.zshrc (copy left)\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+	if _, err := os.Stat(filepath.Join(tmuxTarget, "tmux.conf")); err != nil {
+		t.Fatalf("tmux copy missing: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(home, ".zshrc")); err != nil || string(data) != "export EDITOR=vim\n" {
+		t.Fatalf("zsh copy mismatch: data=%q err=%v", string(data), err)
+	}
+}
+
 func TestCommandReturnsCoreErrors(t *testing.T) {
 	_, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
 
 [packages.zsh]
 links = []
+
+[collections.terminal]
+packages = ["zsh"]
 `)
 
-	_, _, err := executeCommand("--repo", repo, "link", "tmux")
+	_, _, err := executeCommand("--repo", repo, "link")
+	if err == nil || !strings.Contains(err.Error(), "select at least one package or collection") {
+		t.Fatalf("expected selection error, got %v", err)
+	}
+
+	_, _, err = executeCommand("--repo", repo, "link", "tmux")
 	if err == nil || !strings.Contains(err.Error(), "unknown package") {
 		t.Fatalf("expected unknown package error, got %v", err)
+	}
+
+	_, _, err = executeCommand("--repo", repo, "link", "--all", "zsh")
+	if err == nil || !strings.Contains(err.Error(), "--all cannot be combined") {
+		t.Fatalf("expected --all package conflict error, got %v", err)
+	}
+
+	_, _, err = executeCommand("--repo", repo, "unlink", "--all", "--collection", "terminal")
+	if err == nil || !strings.Contains(err.Error(), "--all cannot be combined") {
+		t.Fatalf("expected --all collection conflict error, got %v", err)
 	}
 }
 
