@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"dotty/internal/cli"
+	"github.com/lmilojevicc/dotty/internal/cli"
 )
 
 var version = "dev"

@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"dotty/internal/dotty"
+	"github.com/lmilojevicc/dotty/internal/dotty"
 )
 
 // Version is set by main via ldflags at build time.

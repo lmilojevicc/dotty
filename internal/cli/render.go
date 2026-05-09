@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"dotty/internal/dotty"
+	"github.com/lmilojevicc/dotty/internal/dotty"
 )
 
 var stateStyles = map[dotty.State]lipgloss.Style{

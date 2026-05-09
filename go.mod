@@ -1,4 +1,4 @@
-module dotty
+module github.com/lmilojevicc/dotty
 
 go 1.26
 

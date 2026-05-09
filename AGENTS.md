@@ -17,7 +17,7 @@
 
 ## Code Layout
 
-- This is a single Go module (`module dotty`, Go 1.22) with packages `cmd/dotty`, `internal/cli`, and `internal/dotty`.
+- This is a single Go module (`module github.com/lmilojevicc/dotty`, Go 1.26) with packages `cmd/dotty`, `internal/cli`, and `internal/dotty`.
 - `cmd/dotty/main.go` only constructs `cli.NewRootCommand`; Cobra flags and rendering live in `internal/cli`.
 - Core behavior lives in `internal/dotty`: manifest/config/path handling plus add/link/unlink/status/list and rollback helpers.
 - Repository resolution order is `--repo`, then `DOTTY_REPO`, then `~/.config/dotty/config.toml` via `XDG_CONFIG_HOME` when set.

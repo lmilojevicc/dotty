@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
-	"dotty/internal/dotty"
+	"github.com/lmilojevicc/dotty/internal/dotty"
 )
 
 func TestAddPrintsTargetToPackageSource(t *testing.T) {
