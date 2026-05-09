@@ -27,7 +27,12 @@ func (s Service) Unlink(options UnlinkOptions) ([]UnlinkResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		selected, err := ResolvePackageSelection(manifest, options.Packages, options.Collections, options.All)
+		selected, err := ResolvePackageSelection(
+			manifest,
+			options.Packages,
+			options.Collections,
+			options.All,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -49,7 +54,12 @@ func (s Service) Unlink(options UnlinkOptions) ([]UnlinkResult, error) {
 		if err != nil {
 			return err
 		}
-		selected, err := ResolvePackageSelection(manifest, options.Packages, options.Collections, options.All)
+		selected, err := ResolvePackageSelection(
+			manifest,
+			options.Packages,
+			options.Collections,
+			options.All,
+		)
 		if err != nil {
 			return err
 		}
@@ -70,7 +80,13 @@ func (s Service) Unlink(options UnlinkOptions) ([]UnlinkResult, error) {
 	return unlinked, nil
 }
 
-func (s Service) unlinkMapping(tx *Tx, packageName string, mapping LinkMapping, hard bool, dryRun bool) (UnlinkResult, error) {
+func (s Service) unlinkMapping(
+	tx *Tx,
+	packageName string,
+	mapping LinkMapping,
+	hard bool,
+	dryRun bool,
+) (UnlinkResult, error) {
 	result := UnlinkResult{Package: packageName, Target: mapping.Target, Hard: hard, DryRun: dryRun}
 	sourceAbs, err := PackageSourcePath(s.Repo, packageName, mapping.Source)
 	if err != nil {

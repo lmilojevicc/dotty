@@ -99,7 +99,11 @@ func (s Service) AddWithOptions(options AddOptions) (*AddResult, error) {
 	return &result, nil
 }
 
-func (s Service) planAdd(targetInput, packageName string, manifest *Manifest, dryRun bool) (*addPlan, error) {
+func (s Service) planAdd(
+	targetInput, packageName string,
+	manifest *Manifest,
+	dryRun bool,
+) (*addPlan, error) {
 	if err := validateName("package", packageName); err != nil {
 		return nil, err
 	}
@@ -159,7 +163,11 @@ func (s Service) planAdd(targetInput, packageName string, manifest *Manifest, dr
 			return nil, fmt.Errorf("resolve dotfiles repository %s: %w", s.Repo, err)
 		}
 		if isWithin(repoResolved, adoptPath) {
-			return nil, fmt.Errorf("symlink target %s is inside the dotfiles repository but is not the intended package source %s", adoptPath, dest)
+			return nil, fmt.Errorf(
+				"symlink target %s is inside the dotfiles repository but is not the intended package source %s",
+				adoptPath,
+				dest,
+			)
 		}
 		if dryRun {
 			if err := validateCopyablePath(adoptPath); err != nil {

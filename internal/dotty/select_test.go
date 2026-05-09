@@ -9,7 +9,12 @@ func TestResolvePackageSelectionExpandsCollectionsAndDedupesInOrder(t *testing.T
 	manifest.Packages["ghostty"] = Package{}
 	manifest.Collections["terminal"] = Collection{Packages: []string{"tmux", "ghostty"}}
 
-	selected, err := ResolvePackageSelection(manifest, []string{"zsh", "tmux"}, []string{"terminal"}, false)
+	selected, err := ResolvePackageSelection(
+		manifest,
+		[]string{"zsh", "tmux"},
+		[]string{"terminal"},
+		false,
+	)
 	requireNoError(t, err)
 	requireEqualStrings(t, selected, []string{"zsh", "tmux", "ghostty"})
 }
@@ -61,7 +66,11 @@ func TestResolvePackageSelectionRejectsInvalidSelections(t *testing.T) {
 		{name: "no selection", wantErr: "select at least one package or collection"},
 		{name: "invalid package name", packages: []string{"bad.name"}, wantErr: "package name"},
 		{name: "unknown package", packages: []string{"tmux"}, wantErr: "unknown package"},
-		{name: "invalid collection name", collections: []string{"bad.name"}, wantErr: "collection name"},
+		{
+			name:        "invalid collection name",
+			collections: []string{"bad.name"},
+			wantErr:     "collection name",
+		},
 		{name: "unknown collection", collections: []string{"shell"}, wantErr: "unknown collection"},
 	}
 

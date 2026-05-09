@@ -2,7 +2,12 @@ package dotty
 
 import "fmt"
 
-func ResolvePackageSelection(manifest *Manifest, packages []string, collections []string, all bool) ([]string, error) {
+func ResolvePackageSelection(
+	manifest *Manifest,
+	packages []string,
+	collections []string,
+	all bool,
+) ([]string, error) {
 	manifest.normalize()
 	if all {
 		if len(packages) > 0 || len(collections) > 0 {

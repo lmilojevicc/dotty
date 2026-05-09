@@ -17,7 +17,7 @@ func RunAtomic(fn func(*Tx) error) error {
 	tx := &Tx{}
 	if err := fn(tx); err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
-			return fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
+			return fmt.Errorf("%w (rollback failed: %w)", err, rollbackErr)
 		}
 		return err
 	}
@@ -248,7 +248,10 @@ func copyPath(src, dst string) error {
 			return fmt.Errorf("read directory %s: %w", src, err)
 		}
 		for _, entry := range entries {
-			if err := copyPath(filepath.Join(src, entry.Name()), filepath.Join(dst, entry.Name())); err != nil {
+			if err := copyPath(
+				filepath.Join(src, entry.Name()),
+				filepath.Join(dst, entry.Name()),
+			); err != nil {
 				return err
 			}
 		}

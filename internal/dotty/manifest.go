@@ -68,7 +68,12 @@ func ValidateManifest(manifest *Manifest) error {
 			}
 			key := filepath.Clean(targetAbs)
 			if prev, ok := targets[key]; ok {
-				return fmt.Errorf("target %q is mapped more than once (%s and %s)", link.Target, prev, name)
+				return fmt.Errorf(
+					"target %q is mapped more than once (%s and %s)",
+					link.Target,
+					prev,
+					name,
+				)
 			}
 			targets[key] = name
 		}
@@ -87,7 +92,11 @@ func ValidateManifest(manifest *Manifest) error {
 				return fmt.Errorf("collection %q references unknown package %q", name, packageName)
 			}
 			if seen[packageName] {
-				return fmt.Errorf("collection %q references package %q more than once", name, packageName)
+				return fmt.Errorf(
+					"collection %q references package %q more than once",
+					name,
+					packageName,
+				)
 			}
 			seen[packageName] = true
 		}
@@ -110,7 +119,12 @@ func FormatManifest(manifest *Manifest) string {
 		}
 		b.WriteString("links = [\n")
 		for _, link := range pkg.Links {
-			fmt.Fprintf(&b, "  { source = %s, target = %s },\n", strconv.Quote(link.Source), strconv.Quote(link.Target))
+			fmt.Fprintf(
+				&b,
+				"  { source = %s, target = %s },\n",
+				strconv.Quote(link.Source),
+				strconv.Quote(link.Target),
+			)
 		}
 		b.WriteString("]\n")
 	}
@@ -159,7 +173,11 @@ func sortedKeys[T any](m map[string]T) []string {
 
 func validateName(kind, name string) error {
 	if !namePattern.MatchString(name) {
-		return fmt.Errorf("%s name %q must start with a letter or digit and contain only letters, digits, '_' or '-'", kind, name)
+		return fmt.Errorf(
+			"%s name %q must start with a letter or digit and contain only letters, digits, '_' or '-'",
+			kind,
+			name,
+		)
 	}
 	return nil
 }

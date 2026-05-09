@@ -22,11 +22,17 @@ func (s Service) List() (*Inventory, error) {
 	}
 	inv := &Inventory{}
 	for _, name := range sortedKeys(manifest.Packages) {
-		inv.Packages = append(inv.Packages, InventoryPackage{Name: name, LinkCount: len(manifest.Packages[name].Links)})
+		inv.Packages = append(
+			inv.Packages,
+			InventoryPackage{Name: name, LinkCount: len(manifest.Packages[name].Links)},
+		)
 	}
 	for _, name := range sortedKeys(manifest.Collections) {
 		collection := manifest.Collections[name]
-		inv.Collections = append(inv.Collections, InventoryCollection{Name: name, Packages: collection.Packages})
+		inv.Collections = append(
+			inv.Collections,
+			InventoryCollection{Name: name, Packages: collection.Packages},
+		)
 	}
 	return inv, nil
 }

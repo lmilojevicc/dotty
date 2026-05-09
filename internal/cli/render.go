@@ -5,9 +5,9 @@ import (
 	"io"
 	"strings"
 
-	"dotty/internal/dotty"
-
 	"github.com/charmbracelet/lipgloss"
+
+	"dotty/internal/dotty"
 )
 
 var stateStyles = map[dotty.State]lipgloss.Style{
@@ -25,7 +25,14 @@ func renderAddResult(out io.Writer, result *dotty.AddResult) {
 	if result.DryRun {
 		verb = "would add"
 	}
-	fmt.Fprintf(out, "%s %s: %s -> %s\n", successStyle.Render(verb), packageStyle.Render(result.Package), pathStyle.Render(result.Target), pathStyle.Render(result.SourcePath))
+	fmt.Fprintf(
+		out,
+		"%s %s: %s -> %s\n",
+		successStyle.Render(verb),
+		packageStyle.Render(result.Package),
+		pathStyle.Render(result.Target),
+		pathStyle.Render(result.SourcePath),
+	)
 }
 
 func renderLinkResults(out io.Writer, results []dotty.LinkResult) {
@@ -34,7 +41,14 @@ func renderLinkResults(out io.Writer, results []dotty.LinkResult) {
 		if result.DryRun {
 			verb = "would link"
 		}
-		fmt.Fprintf(out, "%s %s: %s -> %s\n", successStyle.Render(verb), packageStyle.Render(result.Package), pathStyle.Render(result.Target), pathStyle.Render(result.SourcePath))
+		fmt.Fprintf(
+			out,
+			"%s %s: %s -> %s\n",
+			successStyle.Render(verb),
+			packageStyle.Render(result.Package),
+			pathStyle.Render(result.Target),
+			pathStyle.Render(result.SourcePath),
+		)
 	}
 }
 
@@ -52,7 +66,14 @@ func renderUnlinkResults(out io.Writer, results []dotty.UnlinkResult) {
 				verb = "would hard-unlink"
 			}
 		}
-		fmt.Fprintf(out, "%s %s: %s (%s)\n", successStyle.Render(verb), packageStyle.Render(result.Package), pathStyle.Render(result.Target), mutedStyle.Render(note))
+		fmt.Fprintf(
+			out,
+			"%s %s: %s (%s)\n",
+			successStyle.Render(verb),
+			packageStyle.Render(result.Package),
+			pathStyle.Render(result.Target),
+			mutedStyle.Render(note),
+		)
 	}
 }
 
@@ -131,7 +152,12 @@ func renderInventory(out io.Writer, inventory *dotty.Inventory) {
 			if pkg.LinkCount == 1 {
 				label = "link"
 			}
-			fmt.Fprintf(out, "  %-24s %s\n", packageStyle.Render(pkg.Name), mutedStyle.Render(fmt.Sprintf("%d %s", pkg.LinkCount, label)))
+			fmt.Fprintf(
+				out,
+				"  %-24s %s\n",
+				packageStyle.Render(pkg.Name),
+				mutedStyle.Render(fmt.Sprintf("%d %s", pkg.LinkCount, label)),
+			)
 		}
 	}
 	fmt.Fprintln(out)
@@ -141,7 +167,12 @@ func renderInventory(out io.Writer, inventory *dotty.Inventory) {
 		return
 	}
 	for _, collection := range inventory.Collections {
-		fmt.Fprintf(out, "  %-24s %s\n", packageStyle.Render(collection.Name), strings.Join(collection.Packages, ", "))
+		fmt.Fprintf(
+			out,
+			"  %-24s %s\n",
+			packageStyle.Render(collection.Name),
+			strings.Join(collection.Packages, ", "),
+		)
 	}
 }
 

@@ -27,7 +27,12 @@ func (s Service) Link(options LinkOptions) ([]LinkResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		selected, err := ResolvePackageSelection(manifest, options.Packages, options.Collections, options.All)
+		selected, err := ResolvePackageSelection(
+			manifest,
+			options.Packages,
+			options.Collections,
+			options.All,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -49,7 +54,12 @@ func (s Service) Link(options LinkOptions) ([]LinkResult, error) {
 		if err != nil {
 			return err
 		}
-		selected, err := ResolvePackageSelection(manifest, options.Packages, options.Collections, options.All)
+		selected, err := ResolvePackageSelection(
+			manifest,
+			options.Packages,
+			options.Collections,
+			options.All,
+		)
 		if err != nil {
 			return err
 		}
@@ -70,7 +80,13 @@ func (s Service) Link(options LinkOptions) ([]LinkResult, error) {
 	return linked, nil
 }
 
-func (s Service) linkMapping(tx *Tx, packageName string, mapping LinkMapping, force bool, dryRun bool) (LinkResult, error) {
+func (s Service) linkMapping(
+	tx *Tx,
+	packageName string,
+	mapping LinkMapping,
+	force bool,
+	dryRun bool,
+) (LinkResult, error) {
 	result := LinkResult{Package: packageName, Target: mapping.Target, DryRun: dryRun}
 	sourceAbs, err := PackageSourcePath(s.Repo, packageName, mapping.Source)
 	if err != nil {

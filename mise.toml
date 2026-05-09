@@ -1,0 +1,43 @@
+[tools]
+"aqua:google/yamlfmt" = "0.21.0"
+"aqua:golangci/golangci-lint" = "v2.12.2"
+
+[tasks.fmt]
+description = "Format Go and YAML files"
+run = """
+golangci-lint fmt
+yamlfmt -conf .yamlfmt .
+"""
+
+[tasks."fmt:check"]
+description = "Check that Go and YAML formatting is up to date"
+run = """
+golangci-lint fmt --diff
+yamlfmt -conf .yamlfmt -lint .
+"""
+
+[tasks.lint]
+description = "Run Go linter"
+run = "golangci-lint run ./..."
+
+[tasks.vet]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks.test]
+description = "Run Go tests"
+run = "go test ./..."
+
+[tasks.build]
+description = "Build the dotty CLI"
+run = "go build -o dotty ./cmd/dotty"
+
+[tasks.verify]
+description = "Run all CI checks"
+run = """
+mise run fmt:check
+mise run lint
+mise run vet
+mise run test
+mise run build
+"""

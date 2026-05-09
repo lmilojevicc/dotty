@@ -182,7 +182,10 @@ func trackedSourcePrefixes(pkg Package) map[string]bool {
 	return tracked
 }
 
-func untrackedUnderPackage(packageRoot, packageName string, tracked map[string]bool) ([]UntrackedItem, error) {
+func untrackedUnderPackage(
+	packageRoot, packageName string,
+	tracked map[string]bool,
+) ([]UntrackedItem, error) {
 	var items []UntrackedItem
 	if exists, err := pathExists(packageRoot); err != nil || !exists {
 		return items, err
@@ -205,7 +208,13 @@ func untrackedUnderPackage(packageRoot, packageName string, tracked map[string]b
 			}
 			return nil
 		}
-		items = append(items, UntrackedItem{Path: filepath.ToSlash(filepath.Join(packageName, rel)), State: StateUntracked})
+		items = append(
+			items,
+			UntrackedItem{
+				Path:  filepath.ToSlash(filepath.Join(packageName, rel)),
+				State: StateUntracked,
+			},
+		)
 		if d.IsDir() {
 			return filepath.SkipDir
 		}

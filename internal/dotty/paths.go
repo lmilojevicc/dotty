@@ -47,7 +47,8 @@ func HomeRelative(abs string) string {
 		return "~"
 	}
 	rel, err := filepath.Rel(home, abs)
-	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) ||
+		rel == ".." {
 		return abs
 	}
 	return filepath.ToSlash(filepath.Join("~", rel))
@@ -108,7 +109,9 @@ func ResolveRepo(override string) (string, error) {
 		return "", err
 	}
 	if cfg.Repo == "" {
-		return "", fmt.Errorf("dotty repository is not configured; run `dotty init PATH` or pass --repo")
+		return "", fmt.Errorf(
+			"dotty repository is not configured; run `dotty init PATH` or pass --repo",
+		)
 	}
 	return ExpandPath(cfg.Repo)
 }

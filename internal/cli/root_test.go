@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"dotty/internal/dotty"
-
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+
+	"dotty/internal/dotty"
 )
 
 func TestAddPrintsTargetToPackageSource(t *testing.T) {
@@ -21,7 +21,11 @@ func TestAddPrintsTargetToPackageSource(t *testing.T) {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(target, "tmux.conf"), []byte("set -g mouse on\n"), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(target, "tmux.conf"),
+		[]byte("set -g mouse on\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -42,7 +46,11 @@ func TestAddDryRunPrintsWouldAddAndDoesNotChangeFilesystem(t *testing.T) {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(target, "tmux.conf"), []byte("set -g mouse on\n"), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(target, "tmux.conf"),
+		[]byte("set -g mouse on\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 	manifestBefore, err := os.ReadFile(dotty.ManifestPath(repo))
@@ -70,7 +78,11 @@ func TestAddDryRunPrintsWouldAddAndDoesNotChangeFilesystem(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(manifestAfter) != string(manifestBefore) {
-		t.Fatalf("manifest changed\nbefore: %q\nafter:  %q", string(manifestBefore), string(manifestAfter))
+		t.Fatalf(
+			"manifest changed\nbefore: %q\nafter:  %q",
+			string(manifestBefore),
+			string(manifestAfter),
+		)
 	}
 }
 
@@ -87,10 +99,18 @@ links = [
 	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "zsh", ".zshrc"), []byte("source ~/secrets/.zshrc_secrets\n"), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(repo, "zsh", ".zshrc"),
+		[]byte("source ~/secrets/.zshrc_secrets\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "zsh", ".zshrc_secrets"), []byte("export TOKEN=test\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(repo, "zsh", ".zshrc_secrets"),
+		[]byte("export TOKEN=test\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -105,7 +125,11 @@ links = [
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
 	assertSymlink(t, filepath.Join(home, ".zshrc"), filepath.Join(repo, "zsh", ".zshrc"))
-	assertSymlink(t, filepath.Join(home, "secrets", ".zshrc_secrets"), filepath.Join(repo, "zsh", ".zshrc_secrets"))
+	assertSymlink(
+		t,
+		filepath.Join(home, "secrets", ".zshrc_secrets"),
+		filepath.Join(repo, "zsh", ".zshrc_secrets"),
+	)
 }
 
 func TestLinkDryRunPrintsWouldLinkAndDoesNotReplaceConflict(t *testing.T) {
@@ -120,7 +144,11 @@ links = [
 	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "zsh", ".zshrc"), []byte("export EDITOR=vim\n"), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(repo, "zsh", ".zshrc"),
+		[]byte("export EDITOR=vim\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(home, ".zshrc")
@@ -154,7 +182,11 @@ links = [
 	if err := os.MkdirAll(filepath.Join(repo, "tmux"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "tmux", "tmux.conf"), []byte("set -g mouse on\n"), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(repo, "tmux", "tmux.conf"),
+		[]byte("set -g mouse on\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(home, ".config", "tmux")
@@ -279,10 +311,18 @@ links = [
 	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "zsh", ".zshrc"), []byte("export EDITOR=vim\n"), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(repo, "zsh", ".zshrc"),
+		[]byte("export EDITOR=vim\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "zsh", ".zprofile"), []byte("export PATH\n"), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(repo, "zsh", ".zprofile"),
+		[]byte("export PATH\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(repo, "tmux"), 0o755); err != nil {
@@ -291,7 +331,10 @@ links = [
 	if err := os.MkdirAll(filepath.Join(repo, "ghostty"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(repo, "zsh", ".zshrc"), filepath.Join(home, ".zshrc")); err != nil {
+	if err := os.Symlink(
+		filepath.Join(repo, "zsh", ".zshrc"),
+		filepath.Join(home, ".zshrc"),
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -299,7 +342,16 @@ links = [
 	if err != nil {
 		t.Fatalf("status failed: %v\nstderr: %s", err, errOut)
 	}
-	want := fmt.Sprintf("%-24s %s\n%-24s %s\n\n%s\n  %s\n  %s\n", "tmux", "UNLINKED", "zsh", "LINKED", "UNTRACKED", "ghostty", "zsh/.zprofile")
+	want := fmt.Sprintf(
+		"%-24s %s\n%-24s %s\n\n%s\n  %s\n  %s\n",
+		"tmux",
+		"UNLINKED",
+		"zsh",
+		"LINKED",
+		"UNTRACKED",
+		"ghostty",
+		"zsh/.zprofile",
+	)
 	if out != want {
 		t.Fatalf("unexpected status output\nwant:\n%s\ngot:\n%s", want, out)
 	}
@@ -308,7 +360,25 @@ links = [
 	if err != nil {
 		t.Fatalf("status --verbose failed: %v\nstderr: %s", err, errOut)
 	}
-	want = fmt.Sprintf("%-18s %-20s %-36s %s\n%-18s %-20s %-36s %s\n\n%-18s %-20s %-36s %s\n%-18s %-20s %-36s %s\n", "tmux", ".", "~/.config/tmux", "UNLINKED", "zsh", ".zshrc", "~/.zshrc", "LINKED", "-", "ghostty", "-", "UNTRACKED", "-", "zsh/.zprofile", "-", "UNTRACKED")
+	want = fmt.Sprintf(
+		"%-18s %-20s %-36s %s\n%-18s %-20s %-36s %s\n\n%-18s %-20s %-36s %s\n%-18s %-20s %-36s %s\n",
+		"tmux",
+		".",
+		"~/.config/tmux",
+		"UNLINKED",
+		"zsh",
+		".zshrc",
+		"~/.zshrc",
+		"LINKED",
+		"-",
+		"ghostty",
+		"-",
+		"UNTRACKED",
+		"-",
+		"zsh/.zprofile",
+		"-",
+		"UNTRACKED",
+	)
 	if out != want {
 		t.Fatalf("unexpected verbose status output\nwant:\n%s\ngot:\n%s", want, out)
 	}
@@ -359,7 +429,11 @@ packages = ["tmux", "zsh"]
 	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "zsh", ".zshrc"), []byte("export EDITOR=vim\n"), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(repo, "zsh", ".zshrc"),
+		[]byte("export EDITOR=vim\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -393,7 +467,11 @@ links = [
 	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "zsh", ".zshrc"), []byte("export EDITOR=vim\n"), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(repo, "zsh", ".zshrc"),
+		[]byte("export EDITOR=vim\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -458,7 +536,11 @@ links = [
 	if err := os.MkdirAll(tmuxSource, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmuxSource, "tmux.conf"), []byte("set -g mouse on\n"), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(tmuxSource, "tmux.conf"),
+		[]byte("set -g mouse on\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
@@ -491,7 +573,10 @@ links = [
 	if _, err := os.Stat(filepath.Join(tmuxTarget, "tmux.conf")); err != nil {
 		t.Fatalf("tmux copy missing: %v", err)
 	}
-	if data, err := os.ReadFile(filepath.Join(home, ".zshrc")); err != nil || string(data) != "export EDITOR=vim\n" {
+	if data, err := os.ReadFile(
+		filepath.Join(home, ".zshrc"),
+	); err != nil ||
+		string(data) != "export EDITOR=vim\n" {
 		t.Fatalf("zsh copy mismatch: data=%q err=%v", string(data), err)
 	}
 }
@@ -567,7 +652,11 @@ func executeCommand(args ...string) (stdout string, stderr string, err error) {
 
 func writeManifest(t *testing.T, repo string, content string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(repo, dotty.ManifestFileName), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(repo, dotty.ManifestFileName),
+		[]byte(content),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 }

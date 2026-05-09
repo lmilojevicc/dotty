@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"io"
 
-	"dotty/internal/dotty"
-
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+
+	"dotty/internal/dotty"
 )
 
 type app struct {
@@ -24,7 +24,8 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	cmd.PersistentFlags().StringVar(&app.repoFlag, "repo", "", "dotfiles repository path (overrides DOTTY_REPO and config)")
+	cmd.PersistentFlags().
+		StringVar(&app.repoFlag, "repo", "", "dotfiles repository path (overrides DOTTY_REPO and config)")
 	cmd.AddCommand(app.initCommand())
 	cmd.AddCommand(app.addCommand())
 	cmd.AddCommand(app.linkCommand())
@@ -56,7 +57,12 @@ func (a *app) initCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(a.out, "%s %s\n", successStyle.Render("initialized"), pathStyle.Render(repo))
+			fmt.Fprintf(
+				a.out,
+				"%s %s\n",
+				successStyle.Render("initialized"),
+				pathStyle.Render(repo),
+			)
 			return nil
 		},
 	}
@@ -73,7 +79,9 @@ func (a *app) addCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := svc.AddWithOptions(dotty.AddOptions{Target: args[0], Package: args[1], DryRun: dryRun})
+			result, err := svc.AddWithOptions(
+				dotty.AddOptions{Target: args[0], Package: args[1], DryRun: dryRun},
+			)
 			if err != nil {
 				return err
 			}
@@ -99,7 +107,15 @@ func (a *app) linkCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			linked, err := svc.Link(dotty.LinkOptions{Packages: args, Collections: collections, All: all, Force: force, DryRun: dryRun})
+			linked, err := svc.Link(
+				dotty.LinkOptions{
+					Packages:    args,
+					Collections: collections,
+					All:         all,
+					Force:       force,
+					DryRun:      dryRun,
+				},
+			)
 			if err != nil {
 				return err
 			}
@@ -108,7 +124,8 @@ func (a *app) linkCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "link all packages")
-	cmd.Flags().StringArrayVarP(&collections, "collection", "c", nil, "collection to link (can be repeated)")
+	cmd.Flags().
+		StringArrayVarP(&collections, "collection", "c", nil, "collection to link (can be repeated)")
 	cmd.Flags().BoolVar(&force, "force", false, "destructively replace target conflicts")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
 	return cmd
@@ -128,7 +145,15 @@ func (a *app) unlinkCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			unlinked, err := svc.Unlink(dotty.UnlinkOptions{Packages: args, Collections: collections, All: all, Hard: hard, DryRun: dryRun})
+			unlinked, err := svc.Unlink(
+				dotty.UnlinkOptions{
+					Packages:    args,
+					Collections: collections,
+					All:         all,
+					Hard:        hard,
+					DryRun:      dryRun,
+				},
+			)
 			if err != nil {
 				return err
 			}
@@ -137,8 +162,10 @@ func (a *app) unlinkCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "unlink all packages")
-	cmd.Flags().StringArrayVarP(&collections, "collection", "c", nil, "collection to unlink (can be repeated)")
-	cmd.Flags().BoolVar(&hard, "hard", false, "remove expected links without leaving target-side copies")
+	cmd.Flags().
+		StringArrayVarP(&collections, "collection", "c", nil, "collection to unlink (can be repeated)")
+	cmd.Flags().
+		BoolVar(&hard, "hard", false, "remove expected links without leaving target-side copies")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
 	return cmd
 }

@@ -54,10 +54,22 @@ links = [
 	writeTextFile(t, filepath.Join(repo, "partial", "unlinked"), "unlinked")
 
 	requireNoError(t, os.MkdirAll(filepath.Join(home, ".config"), 0o755))
-	requireNoError(t, os.Symlink(filepath.Join(repo, "linked"), filepath.Join(home, ".config", "linked")))
+	requireNoError(
+		t,
+		os.Symlink(filepath.Join(repo, "linked"), filepath.Join(home, ".config", "linked")),
+	)
 	writeTextFile(t, filepath.Join(home, ".config", "conflict-file"), "target copy")
-	requireNoError(t, os.Symlink(filepath.Join(home, "elsewhere"), filepath.Join(home, ".config", "wrong-link")))
-	requireNoError(t, os.Symlink(filepath.Join(repo, "partial", "linked"), filepath.Join(home, ".config", "partial-linked")))
+	requireNoError(
+		t,
+		os.Symlink(filepath.Join(home, "elsewhere"), filepath.Join(home, ".config", "wrong-link")),
+	)
+	requireNoError(
+		t,
+		os.Symlink(
+			filepath.Join(repo, "partial", "linked"),
+			filepath.Join(home, ".config", "partial-linked"),
+		),
+	)
 
 	report, err := NewService(repo).Status(nil)
 	requireNoError(t, err)

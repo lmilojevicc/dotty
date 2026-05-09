@@ -49,7 +49,11 @@ func TestValidateManifestRejectsInvalidManifestShape(t *testing.T) {
 		{
 			name: "absolute package source",
 			manifest: &Manifest{Version: ManifestVersion, Packages: map[string]Package{
-				"zsh": {Links: []LinkMapping{{Source: filepath.Join(home, ".zshrc"), Target: "~/.zshrc"}}},
+				"zsh": {
+					Links: []LinkMapping{
+						{Source: filepath.Join(home, ".zshrc"), Target: "~/.zshrc"},
+					},
+				},
 			}},
 			wantErr: "must be relative to the package root",
 		},
@@ -129,13 +133,19 @@ func TestAddManifestLinkCreatesDedupesAndRejectsTargetReuse(t *testing.T) {
 	if len(links) != 1 {
 		t.Fatalf("expected idempotent link add, got %d links", len(links))
 	}
-	requireErrorContains(t, AddManifestLink(manifest, "zsh", LinkMapping{Source: ".zshenv", Target: "~/.zshrc"}), "already maps target")
+	requireErrorContains(
+		t,
+		AddManifestLink(manifest, "zsh", LinkMapping{Source: ".zshenv", Target: "~/.zshrc"}),
+		"already maps target",
+	)
 }
 
 func TestFormatManifestSortsPackagesAndCollections(t *testing.T) {
 	manifest := NewManifest()
 	manifest.Packages["zsh"] = Package{Links: []LinkMapping{{Source: ".zshrc", Target: "~/.zshrc"}}}
-	manifest.Packages["tmux"] = Package{Links: []LinkMapping{{Source: ".", Target: "~/.config/tmux"}}}
+	manifest.Packages["tmux"] = Package{
+		Links: []LinkMapping{{Source: ".", Target: "~/.config/tmux"}},
+	}
 	manifest.Collections["terminal"] = Collection{Packages: []string{"tmux", "zsh"}}
 	manifest.Collections["shell"] = Collection{Packages: []string{"zsh"}}
 

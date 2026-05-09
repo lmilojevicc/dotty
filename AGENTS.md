@@ -1,0 +1,35 @@
+# Agent Notes
+
+## Commands
+
+- Build the CLI with `go build -o dotty ./cmd/dotty`; the root `dotty` binary is gitignored.
+- Run all tests with `go test ./...`.
+- Run focused tests with `go test ./internal/dotty -run TestName` or `go test ./internal/cli -run TestName`.
+- `mise.toml` is the single source of truth for contributor tool versions and task commands; run `mise trust && mise install` before local checks.
+- Format Go and YAML files with `mise run fmt`; CI checks formatting with `mise run fmt:check`.
+- Keep editor Go format-on-save aligned with `.golangci.yml`: local imports use module path/prefix `dotty` and are grouped after third-party imports.
+- Run all local checks with `mise run verify`; this runs format check, lint, vet, tests, and build.
+- Run focused checks with `mise run lint`, `mise run vet`, `mise run test`, or `mise run build`.
+- Run vulnerability checks with `go run golang.org/x/vuln/cmd/govulncheck@latest ./...` when dependency or security-sensitive code changes.
+- CI installs tools through mise and runs the same mise tasks on pushes to `main` and pull requests; there is no Makefile.
+
+## Code Layout
+
+- This is a single Go module (`module dotty`, Go 1.22) with packages `cmd/dotty`, `internal/cli`, and `internal/dotty`.
+- `cmd/dotty/main.go` only constructs `cli.NewRootCommand`; Cobra flags and rendering live in `internal/cli`.
+- Core behavior lives in `internal/dotty`: manifest/config/path handling plus add/link/unlink/status/list and rollback helpers.
+- Repository resolution order is `--repo`, then `DOTTY_REPO`, then `~/.config/dotty/config.toml` via `XDG_CONFIG_HOME` when set.
+
+## Dotty Semantics
+
+- Keep terminology aligned with `CONTEXT.md`; use terms like Dotfiles Repository, Package, Package Source, Target Path, Link Mapping, Manifest, and Collection.
+- Manifest state is explicit `dotty.toml` Link Mappings; command writes normalize TOML through `FormatManifest` and do not preserve comments or hand formatting.
+- Mutating operations should use `RunAtomic`/`Tx` rollback helpers; dry-run paths should plan and validate without writing files.
+- Link creation uses absolute symlinks; non-symlink content at a Target Path is a Conflict unless `--force` is explicit.
+- Soft `unlink` leaves a target-side copy, so a later `link` sees a Conflict and needs `--force`; `unlink --hard` removes only expected Dotty Links.
+- `status` infers state from filesystem plus Manifest and scans the Dotfiles Repository for Untracked Repository Content; `list` reports Manifest inventory only.
+
+## Tests
+
+- Filesystem tests must isolate `HOME`, `XDG_CONFIG_HOME`, and `DOTTY_REPO`; follow helpers in `internal/cli/root_test.go` and `internal/dotty/test_helpers_test.go` instead of touching real user paths.
+- CLI output tests assert exact strings; most strip ANSI, but `TestStatusRenderingKeepsLipglossStylesWithoutBorders` expects lipgloss color codes and no table borders.

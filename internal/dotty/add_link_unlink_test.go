@@ -65,9 +65,12 @@ func TestAddDryRunValidatesAndDoesNotMoveLinkOrWriteManifest(t *testing.T) {
 	target := filepath.Join(home, ".config", "tmux")
 	writeTextFile(t, filepath.Join(target, "tmux.conf"), "set -g mouse on\n")
 
-	result, err := NewService(repo).AddWithOptions(AddOptions{Target: target, Package: "tmux", DryRun: true})
+	result, err := NewService(
+		repo,
+	).AddWithOptions(AddOptions{Target: target, Package: "tmux", DryRun: true})
 	requireNoError(t, err)
-	if !result.DryRun || result.Source != "." || result.Target != "~/.config/tmux" || result.SourcePath != "~/dotfiles/tmux" {
+	if !result.DryRun || result.Source != "." || result.Target != "~/.config/tmux" ||
+		result.SourcePath != "~/dotfiles/tmux" {
 		t.Fatalf("unexpected dry-run add result: %#v", result)
 	}
 	requireFileContent(t, filepath.Join(target, "tmux.conf"), "set -g mouse on\n")
@@ -86,7 +89,9 @@ func TestAddDryRunRejectsExternalSymlinkSourceThatCannotBeCopied(t *testing.T) {
 	target := filepath.Join(home, ".config", "tmux")
 	requireNoError(t, os.Symlink(oldSource, target))
 
-	_, err = NewService(repo).AddWithOptions(AddOptions{Target: target, Package: "tmux", DryRun: true})
+	_, err = NewService(
+		repo,
+	).AddWithOptions(AddOptions{Target: target, Package: "tmux", DryRun: true})
 	requireErrorContains(t, err, "unsupported file type")
 	assertSymlink(t, target, oldSource)
 	requireNoPath(t, filepath.Join(repo, "tmux"))
@@ -107,7 +112,9 @@ func TestAddDryRunRejectsExternalSymlinkSourceThatCannotBeRead(t *testing.T) {
 	target := filepath.Join(home, ".config", "tmux")
 	requireNoError(t, os.Symlink(oldSource, target))
 
-	_, err = NewService(repo).AddWithOptions(AddOptions{Target: target, Package: "tmux", DryRun: true})
+	_, err = NewService(
+		repo,
+	).AddWithOptions(AddOptions{Target: target, Package: "tmux", DryRun: true})
 	requireErrorContains(t, err, "open")
 	assertSymlink(t, target, oldSource)
 	requireNoPath(t, filepath.Join(repo, "tmux"))
@@ -186,7 +193,9 @@ links = [
 	target := filepath.Join(home, ".zshrc")
 	writeTextFile(t, target, "local copy\n")
 
-	results, err := NewService(repo).Link(LinkOptions{Packages: []string{"zsh"}, Force: true, DryRun: true})
+	results, err := NewService(
+		repo,
+	).Link(LinkOptions{Packages: []string{"zsh"}, Force: true, DryRun: true})
 	requireNoError(t, err)
 	if len(results) != 1 || !results[0].DryRun || results[0].Target != "~/.zshrc" {
 		t.Fatalf("unexpected link dry-run results: %#v", results)
@@ -390,8 +399,14 @@ links = [
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
 	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux"), 0o755))
 	requireNoError(t, os.MkdirAll(filepath.Join(home, ".config"), 0o755))
-	requireNoError(t, os.Symlink(filepath.Join(repo, "tmux"), filepath.Join(home, ".config", "tmux")))
-	requireNoError(t, os.Symlink(filepath.Join(repo, "zsh", ".zshrc"), filepath.Join(home, ".zshrc")))
+	requireNoError(
+		t,
+		os.Symlink(filepath.Join(repo, "tmux"), filepath.Join(home, ".config", "tmux")),
+	)
+	requireNoError(
+		t,
+		os.Symlink(filepath.Join(repo, "zsh", ".zshrc"), filepath.Join(home, ".zshrc")),
+	)
 
 	results, err := NewService(repo).Unlink(UnlinkOptions{All: true, Hard: true})
 	requireNoError(t, err)
