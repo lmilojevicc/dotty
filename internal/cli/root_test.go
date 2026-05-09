@@ -266,6 +266,22 @@ func TestInitPrintsRepositoryPathAndStoresDefaultRepository(t *testing.T) {
 	}
 }
 
+func TestVersionCommandPrintsVersion(t *testing.T) {
+	previousVersion := Version
+	Version = "v1.2.3"
+	t.Cleanup(func() { Version = previousVersion })
+
+	out, errOut, err := executeCommand("version")
+	if err != nil {
+		t.Fatalf("version failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "dotty version v1.2.3\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+}
+
 func TestListPrintsPackagesAndCollections(t *testing.T) {
 	_, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1

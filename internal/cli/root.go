@@ -11,9 +11,6 @@ import (
 	"github.com/lmilojevicc/dotty/internal/dotty"
 )
 
-// Version is set by main via ldflags at build time.
-var Version string
-
 type app struct {
 	out      io.Writer
 	err      io.Writer
@@ -40,6 +37,7 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 	}
 	cmd.PersistentFlags().
 		StringVar(&app.repoFlag, "repo", "", "dotfiles repository path (overrides DOTTY_REPO and config)")
+	cmd.AddCommand(app.versionCommand())
 	cmd.AddCommand(app.initCommand())
 	cmd.AddCommand(app.addCommand())
 	cmd.AddCommand(app.linkCommand())
@@ -55,6 +53,20 @@ func (a *app) service() (dotty.Service, error) {
 		return dotty.Service{}, err
 	}
 	return dotty.NewService(repo, a.env), nil
+}
+
+func (a *app) versionCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the version number",
+		Args:  noArgs,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			return nil
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Fprintf(a.out, "%s version %s\n", cmd.Root().Name(), Version)
+		},
+	}
 }
 
 func (a *app) initCommand() *cobra.Command {

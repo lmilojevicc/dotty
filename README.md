@@ -5,7 +5,7 @@
 
 _Manage dotfiles with explicit TOML link mappings._
 
-[Overview](#overview) | [Features](#features) | [Getting Started](#getting-started) | [Workflow](#basic-workflow) | [Manifest](#manifest) | [Commands](#commands) | [Development](#development)
+[Overview](#overview) | [Features](#features) | [Getting Started](#getting-started) | [Installation](#installation) | [Workflow](#basic-workflow) | [Manifest](#manifest) | [Commands](#commands) | [Development](#development)
 
 </div>
 
@@ -39,8 +39,30 @@ This makes status, conflict detection, unlink behavior, and migration from symli
 
 ### Prerequisites
 
-- [Go 1.22+](https://go.dev/dl/)
-- [mise](https://mise.jdx.dev/) for contributor tooling and local verification tasks
+- [Go 1.26+](https://go.dev/dl/) for `go install` or local source builds.
+- [mise](https://mise.jdx.dev/) for contributor tooling and local verification tasks.
+
+### Installation
+
+Install with Go:
+
+```bash
+go install github.com/lmilojevicc/dotty/cmd/dotty@latest
+```
+
+If `dotty` is not found after installing, make sure Go's binary directory is on your `PATH`:
+
+```bash
+export PATH="$(go env GOPATH)/bin:$PATH"
+```
+
+To pin a specific release:
+
+```bash
+go install github.com/lmilojevicc/dotty/cmd/dotty@v0.1.2
+```
+
+Prebuilt archives are also available on [GitHub Releases](https://github.com/lmilojevicc/dotty/releases).
 
 ### Build From Source
 
