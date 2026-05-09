@@ -2,15 +2,17 @@
 
 ## Commands
 
-- Build the CLI with `go build -o dotty ./cmd/dotty`; the root `dotty` binary is gitignored.
-- Run all tests with `go test ./...`.
-- Run focused tests with `go test ./internal/dotty -run TestName` or `go test ./internal/cli -run TestName`.
+- Build the CLI with `mise run build`; the root `dotty` binary is gitignored.
 - `mise.toml` is the single source of truth for contributor tool versions and task commands; run `mise trust && mise install` before local checks.
-- Format Go and YAML files with `mise run fmt`; CI checks formatting with `mise run fmt:check`.
+- If `mise` is unavailable, inspect `mise.toml` and run the underlying commands defined there.
+- Agents must use mise tasks for formatting, linting, vetting, and testing checks instead of invoking formatter, linter, vet, or test tools directly.
+- Format Go and YAML files with `mise run fmt`; check formatting with `mise run fmt:check`.
+- Run all tests with `mise run test`.
+- Run focused tests with `mise run test:focused ./internal/dotty TestName` or `mise run test:focused ./internal/cli TestName`.
 - Keep editor Go format-on-save aligned with `.golangci.yml`: local imports use module path/prefix `dotty` and are grouped after third-party imports.
-- Run all local checks with `mise run verify`; this runs format check, lint, vet, tests, and build.
-- Run focused checks with `mise run lint`, `mise run vet`, `mise run test`, or `mise run build`.
-- Run vulnerability checks with `go run golang.org/x/vuln/cmd/govulncheck@latest ./...` when dependency or security-sensitive code changes.
+- Agents must use `mise run verify` for final verification; this runs format check, lint, vet, tests, and build.
+- Run focused checks with `mise run lint`, `mise run vet`, `mise run test`, `mise run test:focused`, or `mise run build`.
+- Run vulnerability checks with `mise run vuln` when dependency or security-sensitive code changes.
 - CI installs tools through mise and runs the same mise tasks on pushes to `main` and pull requests; there is no Makefile.
 
 ## Code Layout

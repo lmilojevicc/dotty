@@ -1,6 +1,7 @@
 [tools]
 "aqua:google/yamlfmt" = "0.21.0"
 "aqua:golangci/golangci-lint" = "v2.12.2"
+"go:golang.org/x/vuln/cmd/govulncheck" = "v1.3.0"
 
 [tasks.fmt]
 description = "Format Go and YAML files"
@@ -24,9 +25,21 @@ run = "golangci-lint run ./..."
 description = "Run go vet"
 run = "go vet ./..."
 
+[tasks.vuln]
+description = "Run Go vulnerability checks"
+run = "govulncheck ./..."
+
 [tasks.test]
 description = "Run Go tests"
 run = "go test ./..."
+
+[tasks."test:focused"]
+description = "Run focused Go tests by package and -run pattern"
+usage = '''
+arg "<package>" help="Go package path to test, e.g. ./internal/cli"
+arg "<pattern>" help="Test name or regular expression for go test -run"
+'''
+run = 'go test "${usage_package:?}" -run "${usage_pattern:?}"'
 
 [tasks.build]
 description = "Build the dotty CLI"
