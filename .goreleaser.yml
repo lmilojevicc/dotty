@@ -1,0 +1,74 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: dotty
+
+builds:
+  - id: dotty
+    main: ./cmd/dotty
+    binary: dotty
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE*
+      - README*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Refactoring
+      regexp: '^.*?refactor(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^ci:"
+      - "^test:"
+
+release:
+  github:
+    owner: lmilojevicc
+    name: dotty
+  draft: false
+  prerelease: auto
+  name_template: "{{.Tag}}"
+  # brews:
+  #   - repository:
+  #       owner: lmilojevicc
+  #       name: homebrew-tap
+  #     directory: Formula
+  #     homepage: "https://github.com/lmilojevicc/dotty"
+  #     description: "Go CLI for deterministic dotfile management"
+  #     license: "MIT"
+  #     install: |
+  #       bin.install "dotty"
+  #     test: |
+  #       system "#{bin}/dotty", "--version"

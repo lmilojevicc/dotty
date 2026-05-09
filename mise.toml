@@ -1,6 +1,7 @@
 [tools]
 "aqua:google/yamlfmt" = "0.21.0"
 "aqua:golangci/golangci-lint" = "v2.12.2"
+"aqua:goreleaser/goreleaser" = "v2.15.0"
 "go:golang.org/x/vuln/cmd/govulncheck" = "v1.3.0"
 
 [tasks.fmt]
@@ -44,6 +45,14 @@ run = 'go test "${usage_package:?}" -run "${usage_pattern:?}"'
 [tasks.build]
 description = "Build the dotty CLI"
 run = "go build -o dotty ./cmd/dotty"
+
+[tasks."release:check"]
+description = "Validate GoReleaser configuration"
+run = "goreleaser check"
+
+[tasks."release:snapshot"]
+description = "Build a local snapshot release (no publish)"
+run = "goreleaser release --snapshot --clean"
 
 [tasks.verify]
 description = "Run all CI checks"

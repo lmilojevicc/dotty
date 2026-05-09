@@ -11,6 +11,9 @@ import (
 	"dotty/internal/dotty"
 )
 
+// Version is set by main via ldflags at build time.
+var Version string
+
 type app struct {
 	out      io.Writer
 	err      io.Writer
@@ -23,6 +26,7 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "dotty",
 		Short:         "Manage dotfiles with explicit TOML link mappings",
+		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
