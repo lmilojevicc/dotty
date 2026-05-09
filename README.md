@@ -119,14 +119,14 @@ dotty unlink --collection terminal
 
 ## Commands
 
-| Command                      | Purpose                                                              | Useful flags                                    |
-| ---------------------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
-| `dotty init [path]`          | Initialize a Dotfiles Repository and remember it as the default.     | None                                            |
-| `dotty add PATH PACKAGE`     | Adopt an existing file, directory, or symlink target into a Package. | `--dry-run`                                     |
-| `dotty link [packages...]`   | Create Links for selected Packages.                                  | `--all`, `--collection`, `--force`, `--dry-run` |
-| `dotty unlink [packages...]` | Remove Links for selected Packages.                                  | `--all`, `--collection`, `--hard`, `--dry-run`  |
-| `dotty status [packages...]` | Show package state inferred from the Manifest and filesystem.        | `--verbose`                                     |
-| `dotty list`                 | List Packages and Collections defined in the Manifest.               | None                                            |
+| Command                                                          | Purpose                                                              | Useful flags                                    |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
+| `dotty init [<path>]`                                            | Initialize a Dotfiles Repository and remember it as the default.     | None                                            |
+| `dotty add <path> <package>`                                     | Adopt an existing file, directory, or symlink target into a Package. | `--dry-run`                                     |
+| `dotty link <package>... \| --all \| --collection <collection>`   | Create Links for selected Packages.                                  | `--all`, `--collection`, `--force`, `--dry-run` |
+| `dotty unlink <package>... \| --all \| --collection <collection>` | Remove Links for selected Packages.                                  | `--all`, `--collection`, `--hard`, `--dry-run`  |
+| `dotty status [<package>...]`                                    | Show package state inferred from the Manifest and filesystem.        | `--verbose`                                     |
+| `dotty list`                                                     | List Packages and Collections defined in the Manifest.               | None                                            |
 
 All commands accept the global `--repo` flag when they need to operate on a specific Dotfiles Repository.
 
@@ -148,7 +148,7 @@ Dotty resolves the Dotfiles Repository in this order:
 2. The `DOTTY_REPO` environment variable.
 3. `~/.config/dotty/config.toml`, or `$XDG_CONFIG_HOME/dotty/config.toml` when `XDG_CONFIG_HOME` is set.
 
-`dotty init PATH` creates the Manifest if needed, validates any existing Manifest, and records the Default Repository in the user config file.
+`dotty init <path>` creates the Manifest if needed, validates any existing Manifest, and records the Default Repository in the user config file.
 
 ## Stow-Style Migration
 

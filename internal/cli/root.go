@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -45,9 +46,9 @@ func (a *app) service() (dotty.Service, error) {
 
 func (a *app) initCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "init [path]",
+		Use:   "init [<path>]",
 		Short: "Initialize a dotty repository and remember it as the default",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  maximumArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "."
 			if len(args) == 1 {
@@ -71,9 +72,9 @@ func (a *app) initCommand() *cobra.Command {
 func (a *app) addCommand() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
-		Use:   "add PATH PACKAGE",
+		Use:   "add <path> <package>",
 		Short: "Adopt an existing file, directory, or symlink target into a package",
-		Args:  cobra.ExactArgs(2),
+		Args:  exactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -99,9 +100,9 @@ func (a *app) linkCommand() *cobra.Command {
 	var force bool
 	var dryRun bool
 	cmd := &cobra.Command{
-		Use:   "link [packages...]",
+		Use:   "link <package>... | --all | --collection <collection>",
 		Short: "Create links for packages, all packages, or an explicit collection",
-		Args:  cobra.ArbitraryArgs,
+		Args:  selectionArgs(&collections, &all),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -137,9 +138,9 @@ func (a *app) unlinkCommand() *cobra.Command {
 	var hard bool
 	var dryRun bool
 	cmd := &cobra.Command{
-		Use:   "unlink [packages...]",
+		Use:   "unlink <package>... | --all | --collection <collection>",
 		Short: "Remove links for packages, all packages, or an explicit collection",
-		Args:  cobra.ArbitraryArgs,
+		Args:  selectionArgs(&collections, &all),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -173,7 +174,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 func (a *app) statusCommand() *cobra.Command {
 	var verbose bool
 	cmd := &cobra.Command{
-		Use:   "status [packages...]",
+		Use:   "status [<package>...]",
 		Short: "Show linked, unlinked, conflict, missing-source, empty, partial, and untracked states",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -197,7 +198,7 @@ func (a *app) listCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List packages and collections defined in the manifest",
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -211,6 +212,52 @@ func (a *app) listCommand() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func exactArgs(count int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) != count {
+			return usageError(cmd)
+		}
+		return nil
+	}
+}
+
+func maximumArgs(count int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) > count {
+			return usageError(cmd)
+		}
+		return nil
+	}
+}
+
+func noArgs(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		return usageError(cmd)
+	}
+	return nil
+}
+
+func selectionArgs(collections *[]string, all *bool) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 && len(*collections) == 0 && !*all {
+			return usageError(cmd)
+		}
+		return nil
+	}
+}
+
+func usageError(cmd *cobra.Command) error {
+	return fmt.Errorf("usage: %s", sampleUsage(cmd))
+}
+
+func sampleUsage(cmd *cobra.Command) string {
+	useParts := strings.Fields(cmd.Use)
+	if len(useParts) <= 1 {
+		return cmd.CommandPath()
+	}
+	return cmd.CommandPath() + " " + strings.Join(useParts[1:], " ")
 }
 
 var (

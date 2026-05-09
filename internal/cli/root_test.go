@@ -593,8 +593,8 @@ packages = ["zsh"]
 `)
 
 	_, _, err := executeCommand("--repo", repo, "link")
-	if err == nil || !strings.Contains(err.Error(), "select at least one package or collection") {
-		t.Fatalf("expected selection error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "usage: dotty link") {
+		t.Fatalf("expected usage error, got %v", err)
 	}
 
 	_, _, err = executeCommand("--repo", repo, "link", "tmux")
@@ -610,6 +610,56 @@ packages = ["zsh"]
 	_, _, err = executeCommand("--repo", repo, "unlink", "--all", "--collection", "terminal")
 	if err == nil || !strings.Contains(err.Error(), "--all cannot be combined") {
 		t.Fatalf("expected --all collection conflict error, got %v", err)
+	}
+}
+
+func TestCommandArgumentErrorsIncludeSampleUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "add missing args",
+			args: []string{"add"},
+			want: "usage: dotty add <path> <package>",
+		},
+		{
+			name: "add too many args",
+			args: []string{"add", "one", "two", "three"},
+			want: "usage: dotty add <path> <package>",
+		},
+		{
+			name: "init too many args",
+			args: []string{"init", "one", "two"},
+			want: "usage: dotty init [<path>]",
+		},
+		{
+			name: "link missing selector",
+			args: []string{"link"},
+			want: "usage: dotty link <package>... | --all | --collection <collection>",
+		},
+		{
+			name: "unlink missing selector",
+			args: []string{"unlink"},
+			want: "usage: dotty unlink <package>... | --all | --collection <collection>",
+		},
+		{name: "list too many args", args: []string{"list", "extra"}, want: "usage: dotty list"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, err := executeCommand(tt.args...)
+			if err == nil {
+				t.Fatalf("expected argument error")
+			}
+			if err.Error() != tt.want {
+				t.Fatalf("unexpected error\nwant: %q\ngot:  %q", tt.want, err.Error())
+			}
+			if stdout != "" || stderr != "" {
+				t.Fatalf("expected no command output, got stdout=%q stderr=%q", stdout, stderr)
+			}
+		})
 	}
 }
 

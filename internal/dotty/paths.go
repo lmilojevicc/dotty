@@ -110,7 +110,7 @@ func ResolveRepo(override string) (string, error) {
 	}
 	if cfg.Repo == "" {
 		return "", fmt.Errorf(
-			"dotty repository is not configured; run `dotty init PATH` or pass --repo",
+			"dotty repository is not configured; run `dotty init <path>` or pass --repo",
 		)
 	}
 	return ExpandPath(cfg.Repo)
