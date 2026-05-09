@@ -30,10 +30,11 @@ type Config struct {
 
 type Service struct {
 	Repo string
+	Env  Env
 }
 
-func NewService(repo string) Service {
-	return Service{Repo: repo}
+func NewService(repo string, env Env) Service {
+	return Service{Repo: repo, Env: env}
 }
 
 func NewManifest() *Manifest {

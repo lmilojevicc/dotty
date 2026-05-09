@@ -15,6 +15,7 @@ type app struct {
 	out      io.Writer
 	err      io.Writer
 	repoFlag string
+	env      dotty.Env
 }
 
 func NewRootCommand(out, errOut io.Writer) *cobra.Command {
@@ -24,6 +25,14 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 		Short:         "Manage dotfiles with explicit TOML link mappings",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			env, err := dotty.EnvFromOS()
+			if err != nil {
+				return err
+			}
+			app.env = env
+			return nil
+		},
 	}
 	cmd.PersistentFlags().
 		StringVar(&app.repoFlag, "repo", "", "dotfiles repository path (overrides DOTTY_REPO and config)")
@@ -37,11 +46,11 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 }
 
 func (a *app) service() (dotty.Service, error) {
-	repo, err := dotty.ResolveRepo(a.repoFlag)
+	repo, err := dotty.ResolveRepo(a.repoFlag, a.env)
 	if err != nil {
 		return dotty.Service{}, err
 	}
-	return dotty.NewService(repo), nil
+	return dotty.NewService(repo, a.env), nil
 }
 
 func (a *app) initCommand() *cobra.Command {
@@ -54,7 +63,7 @@ func (a *app) initCommand() *cobra.Command {
 			if len(args) == 1 {
 				path = args[0]
 			}
-			repo, err := dotty.Init(path)
+			svc, err := dotty.InitRepo(path, a.env)
 			if err != nil {
 				return err
 			}
@@ -62,7 +71,7 @@ func (a *app) initCommand() *cobra.Command {
 				a.out,
 				"%s %s\n",
 				successStyle.Render("initialized"),
-				pathStyle.Render(repo),
+				pathStyle.Render(svc.Repo),
 			)
 			return nil
 		},

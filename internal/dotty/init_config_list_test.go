@@ -7,18 +7,18 @@ import (
 )
 
 func TestInitCreatesRepositoryManifestAndDefaultRepositoryConfig(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
 
-	got, err := Init(repo)
+	svc, err := InitRepo(repo, env)
 	requireNoError(t, err)
-	if got != repo {
-		t.Fatalf("repo path mismatch: want %s, got %s", repo, got)
+	if svc.Repo != repo {
+		t.Fatalf("repo path mismatch: want %s, got %s", repo, svc.Repo)
 	}
 	if _, err := os.Stat(ManifestPath(repo)); err != nil {
 		t.Fatalf("manifest was not created: %v", err)
 	}
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(env)
 	requireNoError(t, err)
 	if cfg.Repo != "~/dotfiles" {
 		t.Fatalf("default repository mismatch: want ~/dotfiles, got %s", cfg.Repo)
@@ -26,35 +26,34 @@ func TestInitCreatesRepositoryManifestAndDefaultRepositoryConfig(t *testing.T) {
 }
 
 func TestInitValidatesExistingManifestWithoutOverwritingIt(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
 	requireNoError(t, os.MkdirAll(repo, 0o755))
 	manifest := "version = 1\n\n[packages.zsh]\nlinks = []\n"
 	writeDottyManifest(t, repo, manifest)
 
-	_, err := Init(repo)
+	_, err := InitRepo(repo, env)
 	requireNoError(t, err)
 	requireFileContent(t, ManifestPath(repo), manifest)
 }
 
 func TestInitRejectsInvalidExistingManifest(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
 	requireNoError(t, os.MkdirAll(repo, 0o755))
 	writeDottyManifest(t, repo, "version = 2\n")
 
-	_, err := Init(repo)
+	_, err := InitRepo(repo, env)
 	requireErrorContains(t, err, "unsupported manifest version")
 
-	configPath, configErr := ConfigFilePath()
-	requireNoError(t, configErr)
+	configPath := env.ConfigFilePath()
 	requireNoPath(t, configPath)
 }
 
 func TestLoadConfigReturnsEmptyConfigWhenMissing(t *testing.T) {
-	setupHome(t)
+	_, env := setupHome(t)
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(env)
 	requireNoError(t, err)
 	if cfg.Repo != "" {
 		t.Fatalf("missing config should return empty repo, got %q", cfg.Repo)
@@ -62,7 +61,7 @@ func TestLoadConfigReturnsEmptyConfigWhenMissing(t *testing.T) {
 }
 
 func TestListReportsSortedInventoryWithoutInspectingFilesystemState(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
 	requireNoError(t, os.MkdirAll(repo, 0o755))
 	writeDottyManifest(t, repo, `version = 1
@@ -85,7 +84,7 @@ packages = ["tmux", "zsh"]
 packages = ["zsh"]
 `)
 
-	inv, err := NewService(repo).List()
+	inv, err := NewService(repo, env).List()
 	requireNoError(t, err)
 	if len(inv.Packages) != 2 {
 		t.Fatalf("expected 2 packages, got %d", len(inv.Packages))

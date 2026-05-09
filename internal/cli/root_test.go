@@ -171,7 +171,7 @@ links = [
 }
 
 func TestUnlinkPrintsTargetAction(t *testing.T) {
-	home, repo := setupCLITest(t)
+	_, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
 
 [packages.tmux]
@@ -189,6 +189,8 @@ links = [
 	); err != nil {
 		t.Fatal(err)
 	}
+	home, _ := filepath.Split(repo)
+	home = filepath.Dir(home)
 	target := filepath.Join(home, ".config", "tmux")
 	if err := os.Symlink(filepath.Join(repo, "tmux"), target); err != nil {
 		t.Fatal(err)
@@ -251,7 +253,11 @@ func TestInitPrintsRepositoryPathAndStoresDefaultRepository(t *testing.T) {
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
-	cfg, err := dotty.LoadConfig()
+	env := dotty.Env{
+		Home:          home,
+		XDGConfigHome: filepath.Join(home, ".config"),
+	}
+	cfg, err := dotty.LoadConfig(env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -673,7 +679,11 @@ func setupCLITest(t *testing.T) (home string, repo string) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("DOTTY_REPO", "")
-	if _, err := dotty.Init(repo); err != nil {
+	env := dotty.Env{
+		Home:          home,
+		XDGConfigHome: filepath.Join(home, ".config"),
+	}
+	if _, err := dotty.InitRepo(repo, env); err != nil {
 		t.Fatal(err)
 	}
 	return home, repo

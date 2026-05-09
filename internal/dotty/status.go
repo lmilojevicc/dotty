@@ -44,7 +44,7 @@ type UntrackedItem struct {
 }
 
 func (s Service) Status(packageFilter []string) (*StatusReport, error) {
-	manifest, err := LoadManifest(s.Repo)
+	manifest, err := LoadManifest(s.Repo, s.Env)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +93,7 @@ func (s Service) entryStatus(packageName string, mapping LinkMapping) EntryStatu
 		entry.State = StateMissingSource
 		return entry
 	}
-	targetAbs, err := ExpandTargetPath(mapping.Target)
+	targetAbs, err := ExpandTargetPath(mapping.Target, s.Env)
 	if err != nil {
 		entry.State = StateConflict
 		return entry

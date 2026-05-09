@@ -6,9 +6,10 @@ import (
 )
 
 func TestValidateManifestNormalizesNilMaps(t *testing.T) {
+	_, env := setupHome(t)
 	manifest := &Manifest{Version: ManifestVersion}
 
-	requireNoError(t, ValidateManifest(manifest))
+	requireNoError(t, ValidateManifest(manifest, env))
 
 	if manifest.Packages == nil {
 		t.Fatal("expected packages map to be initialized")
@@ -19,7 +20,7 @@ func TestValidateManifestNormalizesNilMaps(t *testing.T) {
 }
 
 func TestValidateManifestRejectsInvalidManifestShape(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	absTarget := filepath.Join(home, ".zshrc")
 
 	tests := []struct {
@@ -117,17 +118,18 @@ func TestValidateManifestRejectsInvalidManifestShape(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			requireErrorContains(t, ValidateManifest(tt.manifest), tt.wantErr)
+			requireErrorContains(t, ValidateManifest(tt.manifest, env), tt.wantErr)
 		})
 	}
 }
 
 func TestAddManifestLinkCreatesDedupesAndRejectsTargetReuse(t *testing.T) {
+	_, env := setupHome(t)
 	manifest := NewManifest()
 	link := LinkMapping{Source: ".zshrc", Target: "~/.zshrc"}
 
-	requireNoError(t, AddManifestLink(manifest, "zsh", link))
-	requireNoError(t, AddManifestLink(manifest, "zsh", link))
+	requireNoError(t, AddManifestLink(manifest, "zsh", link, env))
+	requireNoError(t, AddManifestLink(manifest, "zsh", link, env))
 
 	links := manifest.Packages["zsh"].Links
 	if len(links) != 1 {
@@ -135,7 +137,7 @@ func TestAddManifestLinkCreatesDedupesAndRejectsTargetReuse(t *testing.T) {
 	}
 	requireErrorContains(
 		t,
-		AddManifestLink(manifest, "zsh", LinkMapping{Source: ".zshenv", Target: "~/.zshrc"}),
+		AddManifestLink(manifest, "zsh", LinkMapping{Source: ".zshenv", Target: "~/.zshrc"}, env),
 		"already maps target",
 	)
 }

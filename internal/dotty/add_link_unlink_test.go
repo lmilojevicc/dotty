@@ -8,11 +8,10 @@ import (
 )
 
 func TestAddFileToNewAndExistingPackageUsesBasenameSource(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
-	_, err := Init(repo)
+	svc, err := InitRepo(repo, env)
 	requireNoError(t, err)
-	svc := NewService(repo)
 
 	zshrc := filepath.Join(home, ".zshrc")
 	writeTextFile(t, zshrc, "export EDITOR=vim\n")
@@ -33,7 +32,7 @@ func TestAddFileToNewAndExistingPackageUsesBasenameSource(t *testing.T) {
 	}
 	assertSymlink(t, zprofile, filepath.Join(repo, "zsh", ".zprofile"))
 
-	manifest, err := LoadManifest(repo)
+	manifest, err := LoadManifest(repo, env)
 	requireNoError(t, err)
 	if got := len(manifest.Packages["zsh"].Links); got != 2 {
 		t.Fatalf("expected 2 zsh link mappings, got %d", got)
@@ -41,14 +40,14 @@ func TestAddFileToNewAndExistingPackageUsesBasenameSource(t *testing.T) {
 }
 
 func TestAddRejectsMissingTargetWithoutChangingManifestOrRepository(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
-	_, err := Init(repo)
+	_, err := InitRepo(repo, env)
 	requireNoError(t, err)
 	manifestBefore, err := os.ReadFile(ManifestPath(repo))
 	requireNoError(t, err)
 
-	_, err = NewService(repo).Add(filepath.Join(home, ".missing"), "zsh")
+	_, err = NewService(repo, env).Add(filepath.Join(home, ".missing"), "zsh")
 	requireErrorContains(t, err, "does not exist")
 
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
@@ -56,9 +55,9 @@ func TestAddRejectsMissingTargetWithoutChangingManifestOrRepository(t *testing.T
 }
 
 func TestAddDryRunValidatesAndDoesNotMoveLinkOrWriteManifest(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
-	_, err := Init(repo)
+	_, err := InitRepo(repo, env)
 	requireNoError(t, err)
 	manifestBefore, err := os.ReadFile(ManifestPath(repo))
 	requireNoError(t, err)
@@ -66,7 +65,7 @@ func TestAddDryRunValidatesAndDoesNotMoveLinkOrWriteManifest(t *testing.T) {
 	writeTextFile(t, filepath.Join(target, "tmux.conf"), "set -g mouse on\n")
 
 	result, err := NewService(
-		repo,
+		repo, env,
 	).AddWithOptions(AddOptions{Target: target, Package: "tmux", DryRun: true})
 	requireNoError(t, err)
 	if !result.DryRun || result.Source != "." || result.Target != "~/.config/tmux" ||
@@ -79,9 +78,9 @@ func TestAddDryRunValidatesAndDoesNotMoveLinkOrWriteManifest(t *testing.T) {
 }
 
 func TestAddDryRunRejectsExternalSymlinkSourceThatCannotBeCopied(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
-	_, err := Init(repo)
+	_, err := InitRepo(repo, env)
 	requireNoError(t, err)
 	oldSource := filepath.Join(home, "old-stow", "tmux")
 	requireNoError(t, os.MkdirAll(oldSource, 0o755))
@@ -90,7 +89,7 @@ func TestAddDryRunRejectsExternalSymlinkSourceThatCannotBeCopied(t *testing.T) {
 	requireNoError(t, os.Symlink(oldSource, target))
 
 	_, err = NewService(
-		repo,
+		repo, env,
 	).AddWithOptions(AddOptions{Target: target, Package: "tmux", DryRun: true})
 	requireErrorContains(t, err, "unsupported file type")
 	assertSymlink(t, target, oldSource)
@@ -98,9 +97,9 @@ func TestAddDryRunRejectsExternalSymlinkSourceThatCannotBeCopied(t *testing.T) {
 }
 
 func TestAddDryRunRejectsExternalSymlinkSourceThatCannotBeRead(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
-	_, err := Init(repo)
+	_, err := InitRepo(repo, env)
 	requireNoError(t, err)
 	oldSource := filepath.Join(home, "old-stow", "tmux")
 	secret := filepath.Join(oldSource, "secret.conf")
@@ -113,7 +112,7 @@ func TestAddDryRunRejectsExternalSymlinkSourceThatCannotBeRead(t *testing.T) {
 	requireNoError(t, os.Symlink(oldSource, target))
 
 	_, err = NewService(
-		repo,
+		repo, env,
 	).AddWithOptions(AddOptions{Target: target, Package: "tmux", DryRun: true})
 	requireErrorContains(t, err, "open")
 	assertSymlink(t, target, oldSource)
@@ -121,9 +120,9 @@ func TestAddDryRunRejectsExternalSymlinkSourceThatCannotBeRead(t *testing.T) {
 }
 
 func TestAddRefusesSymlinkPointingInsideRepositoryButNotIntendedSource(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
-	_, err := Init(repo)
+	_, err := InitRepo(repo, env)
 	requireNoError(t, err)
 	actualSource := filepath.Join(repo, "stow-tmux")
 	requireNoError(t, os.MkdirAll(actualSource, 0o755))
@@ -132,17 +131,17 @@ func TestAddRefusesSymlinkPointingInsideRepositoryButNotIntendedSource(t *testin
 	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
 	requireNoError(t, os.Symlink(actualSource, target))
 
-	_, err = NewService(repo).Add(target, "tmux")
+	_, err = NewService(repo, env).Add(target, "tmux")
 	requireErrorContains(t, err, "inside the dotfiles repository")
 	assertSymlink(t, target, actualSource)
 	requireNoPath(t, filepath.Join(repo, "tmux"))
 }
 
 func TestAddRefusesSymlinkPointingInsideSymlinkedRepository(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	realRepo := filepath.Join(home, "real-dotfiles")
 	repoLink := filepath.Join(home, "dotfiles-link")
-	_, err := Init(realRepo)
+	_, err := InitRepo(realRepo, env)
 	requireNoError(t, err)
 	requireNoError(t, os.Symlink(realRepo, repoLink))
 
@@ -153,14 +152,14 @@ func TestAddRefusesSymlinkPointingInsideSymlinkedRepository(t *testing.T) {
 	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
 	requireNoError(t, os.Symlink(actualSource, target))
 
-	_, err = NewService(repoLink).Add(target, "tmux")
+	_, err = NewService(repoLink, env).Add(target, "tmux")
 	requireErrorContains(t, err, "inside the dotfiles repository")
 	assertSymlink(t, target, actualSource)
 	requireNoPath(t, filepath.Join(realRepo, "tmux"))
 }
 
 func TestLinkRefusesTargetConflictUnlessForced(t *testing.T) {
-	home, repo := setupLinkedPackageTest(t, `version = 1
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
 links = [
@@ -170,7 +169,7 @@ links = [
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
 	writeTextFile(t, target, "local copy\n")
-	svc := NewService(repo)
+	svc := NewService(repo, env)
 
 	_, err := svc.Link(LinkOptions{Packages: []string{"zsh"}})
 	requireErrorContains(t, err, "already exists")
@@ -182,7 +181,7 @@ links = [
 }
 
 func TestLinkDryRunValidatesForceWithoutReplacingConflict(t *testing.T) {
-	home, repo := setupLinkedPackageTest(t, `version = 1
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
 links = [
@@ -194,7 +193,7 @@ links = [
 	writeTextFile(t, target, "local copy\n")
 
 	results, err := NewService(
-		repo,
+		repo, env,
 	).Link(LinkOptions{Packages: []string{"zsh"}, Force: true, DryRun: true})
 	requireNoError(t, err)
 	if len(results) != 1 || !results[0].DryRun || results[0].Target != "~/.zshrc" {
@@ -204,7 +203,7 @@ links = [
 }
 
 func TestLinkDryRunRejectsTargetParentConflict(t *testing.T) {
-	home, repo := setupLinkedPackageTest(t, `version = 1
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
 links = [
@@ -214,13 +213,13 @@ links = [
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
 	writeTextFile(t, filepath.Join(home, ".config", "zsh"), "not a directory\n")
 
-	_, err := NewService(repo).Link(LinkOptions{Packages: []string{"zsh"}, DryRun: true})
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"zsh"}, DryRun: true})
 	requireErrorContains(t, err, "not a directory")
 	requireFileContent(t, filepath.Join(home, ".config", "zsh"), "not a directory\n")
 }
 
 func TestLinkRefusesWrongSymlinkUnlessForced(t *testing.T) {
-	home, repo := setupLinkedPackageTest(t, `version = 1
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
 links = [
@@ -232,7 +231,7 @@ links = [
 	wrongSource := filepath.Join(home, "other-zshrc")
 	writeTextFile(t, wrongSource, "wrong\n")
 	requireNoError(t, os.Symlink(wrongSource, target))
-	svc := NewService(repo)
+	svc := NewService(repo, env)
 
 	_, err := svc.Link(LinkOptions{Packages: []string{"zsh"}})
 	requireErrorContains(t, err, "symlink to another source")
@@ -244,7 +243,7 @@ links = [
 }
 
 func TestLinkNormalizesExpectedRelativeSymlinkToAbsoluteLink(t *testing.T) {
-	home, repo := setupLinkedPackageTest(t, `version = 1
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.tmux]
 links = [
@@ -259,17 +258,17 @@ links = [
 	requireNoError(t, err)
 	requireNoError(t, os.Symlink(rel, target))
 
-	_, err = NewService(repo).Link(LinkOptions{Packages: []string{"tmux"}})
+	_, err = NewService(repo, env).Link(LinkOptions{Packages: []string{"tmux"}})
 	requireNoError(t, err)
 	assertSymlink(t, target, source)
 
-	_, err = NewService(repo).Link(LinkOptions{Packages: []string{"tmux"}})
+	_, err = NewService(repo, env).Link(LinkOptions{Packages: []string{"tmux"}})
 	requireNoError(t, err)
 	assertSymlink(t, target, source)
 }
 
 func TestLinkRollsBackEarlierLinksWhenLaterMappingFails(t *testing.T) {
-	home, repo := setupLinkedPackageTest(t, `version = 1
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
 links = [
@@ -279,13 +278,13 @@ links = [
 `)
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
 
-	_, err := NewService(repo).Link(LinkOptions{Packages: []string{"zsh"}})
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"zsh"}})
 	requireErrorContains(t, err, "source \".missing\" is missing")
 	requireNoPath(t, filepath.Join(home, ".zshrc"))
 }
 
 func TestLinkAllLinksEveryPackageAndBareLinkRequiresSelection(t *testing.T) {
-	home, repo := setupLinkedPackageTest(t, `version = 1
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
 links = [
@@ -299,7 +298,7 @@ links = [
 `)
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
 	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux"), 0o755))
-	svc := NewService(repo)
+	svc := NewService(repo, env)
 
 	_, err := svc.Link(LinkOptions{})
 	requireErrorContains(t, err, "select at least one package or collection")
@@ -312,14 +311,14 @@ links = [
 }
 
 func TestUnlinkHandlesAbsentTargetsAndHardUnlinkWithoutSource(t *testing.T) {
-	home, repo := setupLinkedPackageTest(t, `version = 1
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
 links = [
   { source = ".zshrc", target = "~/.zshrc" },
 ]
 `)
-	svc := NewService(repo)
+	svc := NewService(repo, env)
 
 	results, err := svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
 	requireNoError(t, err)
@@ -336,7 +335,7 @@ links = [
 }
 
 func TestUnlinkDryRunLeavesSoftAndHardTargetsUnchanged(t *testing.T) {
-	home, repo := setupLinkedPackageTest(t, `version = 1
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
 links = [
@@ -347,7 +346,7 @@ links = [
 	writeTextFile(t, source, "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
 	requireNoError(t, os.Symlink(source, target))
-	svc := NewService(repo)
+	svc := NewService(repo, env)
 
 	results, err := svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}, DryRun: true})
 	requireNoError(t, err)
@@ -365,7 +364,7 @@ links = [
 }
 
 func TestUnlinkDryRunRejectsSourceThatCannotBeCopied(t *testing.T) {
-	home, repo := setupLinkedPackageTest(t, `version = 1
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
 links = [
@@ -378,13 +377,13 @@ links = [
 	target := filepath.Join(home, ".config", "zsh")
 	requireNoError(t, os.Symlink(source, target))
 
-	_, err := NewService(repo).Unlink(UnlinkOptions{Packages: []string{"zsh"}, DryRun: true})
+	_, err := NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}, DryRun: true})
 	requireErrorContains(t, err, "unsupported file type")
 	assertSymlink(t, target, source)
 }
 
 func TestUnlinkAllUnlinksEveryPackage(t *testing.T) {
-	home, repo := setupLinkedPackageTest(t, `version = 1
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
 links = [
@@ -408,7 +407,7 @@ links = [
 		os.Symlink(filepath.Join(repo, "zsh", ".zshrc"), filepath.Join(home, ".zshrc")),
 	)
 
-	results, err := NewService(repo).Unlink(UnlinkOptions{All: true, Hard: true})
+	results, err := NewService(repo, env).Unlink(UnlinkOptions{All: true, Hard: true})
 	requireNoError(t, err)
 	requireUnlinkResultPackages(t, results, []string{"tmux", "zsh"})
 	requireNoPath(t, filepath.Join(home, ".config", "tmux"))
@@ -416,7 +415,7 @@ links = [
 }
 
 func TestUnlinkRefusesConflictsAndWrongSymlinks(t *testing.T) {
-	home, repo := setupLinkedPackageTest(t, `version = 1
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
 links = [
@@ -424,7 +423,7 @@ links = [
 ]
 `)
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
-	svc := NewService(repo)
+	svc := NewService(repo, env)
 	target := filepath.Join(home, ".zshrc")
 
 	writeTextFile(t, target, "local copy\n")
@@ -442,7 +441,7 @@ links = [
 }
 
 func TestSoftUnlinkCopiesSourceAndFailsWhenSourceIsMissing(t *testing.T) {
-	home, repo := setupLinkedPackageTest(t, `version = 1
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
 links = [
@@ -453,7 +452,7 @@ links = [
 	writeTextFile(t, source, "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
 	requireNoError(t, os.Symlink(source, target))
-	svc := NewService(repo)
+	svc := NewService(repo, env)
 
 	_, err := svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
 	requireNoError(t, err)
@@ -467,13 +466,13 @@ links = [
 	assertSymlink(t, target, source)
 }
 
-func setupLinkedPackageTest(t *testing.T, manifest string) (home string, repo string) {
+func setupLinkedPackageTest(t *testing.T, manifest string) (home string, repo string, env Env) {
 	t.Helper()
-	home = setupHome(t)
+	home, env = setupHome(t)
 	repo = filepath.Join(home, "dotfiles")
 	requireNoError(t, os.MkdirAll(repo, 0o755))
 	writeDottyManifest(t, repo, manifest)
-	return home, repo
+	return home, repo, env
 }
 
 func requireResultPackages(t *testing.T, results []LinkResult, want []string) {

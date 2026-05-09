@@ -6,22 +6,22 @@ import (
 )
 
 func TestPathExpansionAndStorageUseHomeRelativePaths(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 
-	expanded, err := ExpandPath("~/.config/../.zshrc")
+	expanded, err := ExpandPath("~/.config/../.zshrc", env)
 	requireNoError(t, err)
 	if want := filepath.Join(home, ".zshrc"); expanded != want {
 		t.Fatalf("expanded path mismatch: want %s, got %s", want, expanded)
 	}
 
-	stored, err := StoreTargetPath(filepath.Join(home, ".config", "tmux"))
+	stored, err := StoreTargetPath(filepath.Join(home, ".config", "tmux"), env)
 	requireNoError(t, err)
 	if stored != "~/.config/tmux" {
 		t.Fatalf("stored target mismatch: want ~/.config/tmux, got %s", stored)
 	}
 
 	outside := filepath.Join(t.TempDir(), "outside")
-	if got := HomeRelative(outside); got != outside {
+	if got := HomeRelative(outside, env); got != outside {
 		t.Fatalf("outside home path should stay absolute: want %s, got %s", outside, got)
 	}
 }
@@ -51,29 +51,29 @@ func TestPackageSourcePathStaysWithinPackageRoot(t *testing.T) {
 }
 
 func TestResolveRepoPrecedence(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	explicit := filepath.Join(home, "explicit")
 	envRepo := filepath.Join(home, "env")
 	configured := filepath.Join(home, "configured")
 
-	t.Setenv("DOTTY_REPO", envRepo)
-	got, err := ResolveRepo(explicit)
+	envWithRepo := env
+	envWithRepo.DottyRepo = envRepo
+	got, err := ResolveRepo(explicit, envWithRepo)
 	requireNoError(t, err)
 	if got != explicit {
 		t.Fatalf("explicit repo should win: want %s, got %s", explicit, got)
 	}
 
-	got, err = ResolveRepo("")
+	got, err = ResolveRepo("", envWithRepo)
 	requireNoError(t, err)
 	if got != envRepo {
 		t.Fatalf("DOTTY_REPO should win over config: want %s, got %s", envRepo, got)
 	}
 
-	t.Setenv("DOTTY_REPO", "")
 	requireNoError(t, RunAtomic(func(tx *Tx) error {
-		return SaveConfig(tx, &Config{Repo: "~/configured"})
+		return SaveConfig(tx, env, &Config{Repo: "~/configured"})
 	}))
-	got, err = ResolveRepo("")
+	got, err = ResolveRepo("", env)
 	requireNoError(t, err)
 	if got != configured {
 		t.Fatalf("config repo mismatch: want %s, got %s", configured, got)
@@ -81,8 +81,8 @@ func TestResolveRepoPrecedence(t *testing.T) {
 }
 
 func TestResolveRepoErrorsWhenNoRepositoryIsConfigured(t *testing.T) {
-	setupHome(t)
+	_, env := setupHome(t)
 
-	_, err := ResolveRepo("")
+	_, err := ResolveRepo("", env)
 	requireErrorContains(t, err, "repository is not configured")
 }

@@ -7,7 +7,7 @@ import (
 )
 
 func TestStatusReportsPackageStates(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
 	requireNoError(t, os.MkdirAll(repo, 0o755))
 	writeDottyManifest(t, repo, `version = 1
@@ -71,7 +71,7 @@ links = [
 		),
 	)
 
-	report, err := NewService(repo).Status(nil)
+	report, err := NewService(repo, env).Status(nil)
 	requireNoError(t, err)
 
 	wantStates := map[string]State{
@@ -98,7 +98,7 @@ links = [
 }
 
 func TestStatusReportsUntrackedRepositoryContent(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
 	requireNoError(t, os.MkdirAll(repo, 0o755))
 	writeDottyManifest(t, repo, `version = 1
@@ -120,7 +120,7 @@ links = [
 	requireNoError(t, os.MkdirAll(filepath.Join(repo, "ghostty"), 0o755))
 	requireNoError(t, os.MkdirAll(filepath.Join(repo, ".git"), 0o755))
 
-	report, err := NewService(repo).Status(nil)
+	report, err := NewService(repo, env).Status(nil)
 	requireNoError(t, err)
 
 	got := make([]string, 0, len(report.Untracked))
@@ -134,7 +134,7 @@ links = [
 }
 
 func TestStatusFilterRejectsUnknownPackage(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
 	requireNoError(t, os.MkdirAll(repo, 0o755))
 	writeDottyManifest(t, repo, `version = 1
@@ -143,6 +143,6 @@ func TestStatusFilterRejectsUnknownPackage(t *testing.T) {
 links = []
 `)
 
-	_, err := NewService(repo).Status([]string{"tmux"})
+	_, err := NewService(repo, env).Status([]string{"tmux"})
 	requireErrorContains(t, err, "unknown package")
 }

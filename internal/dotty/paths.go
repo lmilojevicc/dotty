@@ -2,17 +2,16 @@ package dotty
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
 
-func ExpandPath(path string) (string, error) {
+func ExpandPath(path string, env Env) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("path is empty")
 	}
 
-	expanded, err := expandHome(path)
+	expanded, err := expandHome(path, env)
 	if err != nil {
 		return "", err
 	}
@@ -25,8 +24,8 @@ func ExpandPath(path string) (string, error) {
 	return filepath.Clean(expanded), nil
 }
 
-func ExpandTargetPath(path string) (string, error) {
-	abs, err := ExpandPath(path)
+func ExpandTargetPath(path string, env Env) (string, error) {
+	abs, err := ExpandPath(path, env)
 	if err != nil {
 		return "", err
 	}
@@ -36,13 +35,12 @@ func ExpandTargetPath(path string) (string, error) {
 	return abs, nil
 }
 
-func HomeRelative(abs string) string {
+func HomeRelative(abs string, env Env) string {
 	abs = filepath.Clean(abs)
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	home := filepath.Clean(env.Home)
+	if home == "" {
 		return abs
 	}
-	home = filepath.Clean(home)
 	if abs == home {
 		return "~"
 	}
@@ -52,18 +50,6 @@ func HomeRelative(abs string) string {
 		return abs
 	}
 	return filepath.ToSlash(filepath.Join("~", rel))
-}
-
-func ConfigFilePath() (string, error) {
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil || home == "" {
-			return "", fmt.Errorf("determine home directory: %w", err)
-		}
-		base = filepath.Join(home, ".config")
-	}
-	return filepath.Join(base, "dotty", "config.toml"), nil
 }
 
 func ManifestPath(repo string) string {
@@ -89,22 +75,22 @@ func PackageSourcePath(repo, packageName, source string) (string, error) {
 	return joined, nil
 }
 
-func StoreTargetPath(input string) (string, error) {
-	abs, err := ExpandTargetPath(input)
+func StoreTargetPath(input string, env Env) (string, error) {
+	abs, err := ExpandTargetPath(input, env)
 	if err != nil {
 		return "", err
 	}
-	return HomeRelative(abs), nil
+	return HomeRelative(abs, env), nil
 }
 
-func ResolveRepo(override string) (string, error) {
+func ResolveRepo(override string, env Env) (string, error) {
 	if override != "" {
-		return ExpandPath(override)
+		return ExpandPath(override, env)
 	}
-	if env := os.Getenv("DOTTY_REPO"); env != "" {
-		return ExpandPath(env)
+	if env.DottyRepo != "" {
+		return ExpandPath(env.DottyRepo, env)
 	}
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(env)
 	if err != nil {
 		return "", err
 	}
@@ -113,19 +99,18 @@ func ResolveRepo(override string) (string, error) {
 			"dotty repository is not configured; run `dotty init <path>` or pass --repo",
 		)
 	}
-	return ExpandPath(cfg.Repo)
+	return ExpandPath(cfg.Repo, env)
 }
 
-func expandHome(path string) (string, error) {
+func expandHome(path string, env Env) (string, error) {
 	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil || home == "" {
-			return "", fmt.Errorf("determine home directory: %w", err)
+		if env.Home == "" {
+			return "", fmt.Errorf("determine home directory: home is empty")
 		}
 		if path == "~" {
-			return home, nil
+			return env.Home, nil
 		}
-		return filepath.Join(home, path[2:]), nil
+		return filepath.Join(env.Home, path[2:]), nil
 	}
 	return path, nil
 }

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func setupHome(t *testing.T) string {
+func setupHome(t *testing.T) (string, Env) {
 	t.Helper()
 	home := filepath.Join(t.TempDir(), "home")
 	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
@@ -14,14 +14,18 @@ func setupHome(t *testing.T) string {
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("DOTTY_REPO", "")
-	return home
+	env := Env{
+		Home:          home,
+		XDGConfigHome: filepath.Join(home, ".config"),
+	}
+	return home, env
 }
 
 func TestAddDirectoryUnlinkAndForceRelink(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
-	if _, err := Init(repo); err != nil {
+	svc, err := InitRepo(repo, env)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -37,7 +41,6 @@ func TestAddDirectoryUnlinkAndForceRelink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewService(repo)
 	result, err := svc.Add(tmuxTarget, "tmux")
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +70,7 @@ func TestAddDirectoryUnlinkAndForceRelink(t *testing.T) {
 }
 
 func TestInPlaceAdoptionFromExistingStowSymlink(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dot-example")
 	if err := os.MkdirAll(filepath.Join(repo, "tmux"), 0o755); err != nil {
 		t.Fatal(err)
@@ -79,7 +82,8 @@ func TestInPlaceAdoptionFromExistingStowSymlink(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Init(repo); err != nil {
+	svc, err := InitRepo(repo, env)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -92,7 +96,6 @@ func TestInPlaceAdoptionFromExistingStowSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewService(repo)
 	if _, err := svc.Add(target, "tmux"); err != nil {
 		t.Fatal(err)
 	}
@@ -104,9 +107,10 @@ func TestInPlaceAdoptionFromExistingStowSymlink(t *testing.T) {
 }
 
 func TestExternalSymlinkAdoptionCopiesSource(t *testing.T) {
-	home := setupHome(t)
+	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
-	if _, err := Init(repo); err != nil {
+	svc, err := InitRepo(repo, env)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -126,7 +130,6 @@ func TestExternalSymlinkAdoptionCopiesSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewService(repo)
 	if _, err := svc.Add(target, "tmux"); err != nil {
 		t.Fatal(err)
 	}

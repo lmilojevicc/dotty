@@ -1,0 +1,167 @@
+package dotty
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+func EnsureDirTx(tx *Tx, dir string, perm os.FileMode) error {
+	dir = filepath.Clean(dir)
+	missing, err := missingDirs(dir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, perm); err != nil {
+		return fmt.Errorf("create directory %s: %w", dir, err)
+	}
+	if len(missing) > 0 {
+		tx.AddRollback(func() error {
+			var errs []error
+			for _, path := range missing {
+				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+					errs = append(errs, err)
+				}
+			}
+			return errors.Join(errs...)
+		})
+	}
+	return nil
+}
+
+func WriteFileTx(tx *Tx, path string, data []byte, perm os.FileMode) error {
+	if err := EnsureDirTx(tx, dirOf(path), 0o755); err != nil {
+		return err
+	}
+	var previous []byte
+	existed := false
+	if current, err := os.ReadFile(path); err == nil {
+		existed = true
+		previous = current
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("read existing file %s: %w", path, err)
+	}
+
+	tmp, err := os.CreateTemp(dirOf(path), ".dotty-write-*")
+	if err != nil {
+		return fmt.Errorf("create temporary file for %s: %w", path, err)
+	}
+	tmpName := tmp.Name()
+	cleanupTemp := true
+	defer func() {
+		_ = tmp.Close()
+		if cleanupTemp {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("write temporary file for %s: %w", path, err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		return fmt.Errorf("chmod temporary file for %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temporary file for %s: %w", path, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replace %s: %w", path, err)
+	}
+	cleanupTemp = false
+
+	tx.AddRollback(func() error {
+		if existed {
+			return os.WriteFile(path, previous, perm)
+		}
+		return os.Remove(path)
+	})
+	return nil
+}
+
+func MovePathTx(tx *Tx, src, dst string) error {
+	if err := EnsureDirTx(tx, dirOf(dst), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(src, dst); err != nil {
+		return fmt.Errorf("move %s to %s: %w", src, dst, err)
+	}
+	tx.AddRollback(func() error {
+		return os.Rename(dst, src)
+	})
+	return nil
+}
+
+func CopyPathTx(tx *Tx, src, dst string) error {
+	if err := EnsureDirTx(tx, dirOf(dst), 0o755); err != nil {
+		return err
+	}
+	dstExisted, err := pathExists(dst)
+	if err != nil {
+		return err
+	}
+	if err := copyPath(src, dst); err != nil {
+		if !dstExisted {
+			_ = os.RemoveAll(dst)
+		}
+		return err
+	}
+	tx.AddRollback(func() error {
+		return os.RemoveAll(dst)
+	})
+	return nil
+}
+
+func RemoveSymlinkTx(tx *Tx, path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return fmt.Errorf("%s is not a symlink", path)
+	}
+	target, err := os.Readlink(path)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	tx.AddRollback(func() error {
+		return os.Symlink(target, path)
+	})
+	return nil
+}
+
+func CreateSymlinkTx(tx *Tx, sourceAbs, targetAbs string) error {
+	if err := EnsureDirTx(tx, dirOf(targetAbs), 0o755); err != nil {
+		return err
+	}
+	if err := os.Symlink(sourceAbs, targetAbs); err != nil {
+		return fmt.Errorf("create symlink %s -> %s: %w", targetAbs, sourceAbs, err)
+	}
+	tx.AddRollback(func() error {
+		return os.Remove(targetAbs)
+	})
+	return nil
+}
+
+func MoveAsideTx(tx *Tx, path string) error {
+	parent := dirOf(path)
+	backup, err := os.MkdirTemp(parent, ".dotty-backup-")
+	if err != nil {
+		return fmt.Errorf("create backup path for %s: %w", path, err)
+	}
+	if err := os.Remove(backup); err != nil {
+		return fmt.Errorf("prepare backup path for %s: %w", path, err)
+	}
+	if err := os.Rename(path, backup); err != nil {
+		return fmt.Errorf("move %s aside: %w", path, err)
+	}
+	tx.AddRollback(func() error {
+		return os.Rename(backup, path)
+	})
+	tx.AddCleanup(func() error {
+		return os.RemoveAll(backup)
+	})
+	return nil
+}

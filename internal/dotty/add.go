@@ -35,7 +35,7 @@ func (s Service) Add(targetInput, packageName string) (*AddResult, error) {
 
 func (s Service) AddWithOptions(options AddOptions) (*AddResult, error) {
 	if options.DryRun {
-		manifest, err := LoadManifest(s.Repo)
+		manifest, err := LoadManifest(s.Repo, s.Env)
 		if err != nil {
 			return nil, err
 		}
@@ -48,7 +48,7 @@ func (s Service) AddWithOptions(options AddOptions) (*AddResult, error) {
 
 	var result AddResult
 	if err := RunAtomic(func(tx *Tx) error {
-		manifest, err := LoadManifest(s.Repo)
+		manifest, err := LoadManifest(s.Repo, s.Env)
 		if err != nil {
 			return err
 		}
@@ -87,7 +87,7 @@ func (s Service) AddWithOptions(options AddOptions) (*AddResult, error) {
 		if err := CreateSymlinkTx(tx, plan.dest, plan.targetAbs); err != nil {
 			return err
 		}
-		if err := SaveManifest(tx, s.Repo, manifest); err != nil {
+		if err := SaveManifest(tx, s.Repo, manifest, s.Env); err != nil {
 			return err
 		}
 
@@ -107,11 +107,11 @@ func (s Service) planAdd(
 	if err := validateName("package", packageName); err != nil {
 		return nil, err
 	}
-	targetAbs, err := ExpandTargetPath(targetInput)
+	targetAbs, err := ExpandTargetPath(targetInput, s.Env)
 	if err != nil {
 		return nil, err
 	}
-	storedTarget := HomeRelative(targetAbs)
+	storedTarget := HomeRelative(targetAbs, s.Env)
 
 	targetInfo, err := os.Lstat(targetAbs)
 	if err != nil {
@@ -177,7 +177,7 @@ func (s Service) planAdd(
 	}
 
 	link := LinkMapping{Source: filepath.ToSlash(sourceRel), Target: storedTarget}
-	if err := AddManifestLink(manifest, packageName, link); err != nil {
+	if err := AddManifestLink(manifest, packageName, link, s.Env); err != nil {
 		return nil, err
 	}
 
@@ -185,7 +185,7 @@ func (s Service) planAdd(
 		result: AddResult{
 			Package:    packageName,
 			Source:     filepath.ToSlash(sourceRel),
-			SourcePath: HomeRelative(dest),
+			SourcePath: HomeRelative(dest, s.Env),
 			Target:     storedTarget,
 			DryRun:     dryRun,
 		},

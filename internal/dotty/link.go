@@ -20,126 +20,165 @@ type LinkResult struct {
 	DryRun     bool
 }
 
-func (s Service) Link(options LinkOptions) ([]LinkResult, error) {
-	var linked []LinkResult
-	if options.DryRun {
-		manifest, err := LoadManifest(s.Repo)
-		if err != nil {
-			return nil, err
-		}
-		selected, err := ResolvePackageSelection(
-			manifest,
-			options.Packages,
-			options.Collections,
-			options.All,
-		)
-		if err != nil {
-			return nil, err
-		}
-		for _, packageName := range selected {
-			pkg := manifest.Packages[packageName]
-			for _, mapping := range pkg.Links {
-				result, err := s.linkMapping(nil, packageName, mapping, options.Force, true)
-				if err != nil {
-					return nil, err
-				}
-				linked = append(linked, result)
-			}
-		}
-		return linked, nil
-	}
+type linkAction struct {
+	packageName string
+	mapping     LinkMapping
+	sourceAbs   string
+	targetAbs   string
+	state       linkTargetState
+}
 
+type linkTargetState int
+
+const (
+	linkTargetAbsent          linkTargetState = iota // target does not exist, create freely
+	linkTargetAlreadyCorrect                         // target is the expected absolute symlink
+	linkTargetRelativeCorrect                        // target points to source via relative path
+	linkTargetWrongSymlink                           // target is a symlink to something else
+	linkTargetNonSymlink                             // target is a regular file/dir (conflict)
+)
+
+func (s Service) Link(options LinkOptions) ([]LinkResult, error) {
+	plan, err := s.planLink(options)
+	if err != nil {
+		return nil, err
+	}
+	if options.DryRun {
+		return s.linkResults(plan, true), nil
+	}
 	if err := RunAtomic(func(tx *Tx) error {
-		manifest, err := LoadManifest(s.Repo)
-		if err != nil {
-			return err
-		}
-		selected, err := ResolvePackageSelection(
-			manifest,
-			options.Packages,
-			options.Collections,
-			options.All,
-		)
-		if err != nil {
-			return err
-		}
-		for _, packageName := range selected {
-			pkg := manifest.Packages[packageName]
-			for _, mapping := range pkg.Links {
-				result, err := s.linkMapping(tx, packageName, mapping, options.Force, false)
-				if err != nil {
-					return err
-				}
-				linked = append(linked, result)
+		for i := range plan.actions {
+			if err := s.executeLinkAction(tx, &plan.actions[i]); err != nil {
+				return err
 			}
 		}
 		return nil
 	}); err != nil {
 		return nil, err
 	}
-	return linked, nil
+	return s.linkResults(plan, false), nil
 }
 
-func (s Service) linkMapping(
-	tx *Tx,
+type linkPlan struct {
+	actions []linkAction
+}
+
+func (s Service) planLink(options LinkOptions) (*linkPlan, error) {
+	manifest, err := LoadManifest(s.Repo, s.Env)
+	if err != nil {
+		return nil, err
+	}
+	selected, err := ResolvePackageSelection(
+		manifest,
+		options.Packages,
+		options.Collections,
+		options.All,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	plan := &linkPlan{}
+	for _, packageName := range selected {
+		pkg := manifest.Packages[packageName]
+		for _, mapping := range pkg.Links {
+			action, err := s.classifyLinkAction(packageName, mapping, options.Force)
+			if err != nil {
+				return nil, err
+			}
+			plan.actions = append(plan.actions, action)
+		}
+	}
+	return plan, nil
+}
+
+func (s Service) classifyLinkAction(
 	packageName string,
 	mapping LinkMapping,
 	force bool,
-	dryRun bool,
-) (LinkResult, error) {
-	result := LinkResult{Package: packageName, Target: mapping.Target, DryRun: dryRun}
+) (linkAction, error) {
+	action := linkAction{packageName: packageName, mapping: mapping}
+
 	sourceAbs, err := PackageSourcePath(s.Repo, packageName, mapping.Source)
 	if err != nil {
-		return result, err
+		return action, err
 	}
-	result.SourcePath = HomeRelative(sourceAbs)
+	action.sourceAbs = sourceAbs
+
 	if exists, err := pathExists(sourceAbs); err != nil {
-		return result, err
+		return action, err
 	} else if !exists {
-		return result, fmt.Errorf("package %q source %q is missing", packageName, mapping.Source)
+		return action, fmt.Errorf("package %q source %q is missing", packageName, mapping.Source)
 	}
-	targetAbs, err := ExpandTargetPath(mapping.Target)
+
+	targetAbs, err := ExpandTargetPath(mapping.Target, s.Env)
 	if err != nil {
-		return result, err
+		return action, err
 	}
+	action.targetAbs = targetAbs
 
 	info, err := os.Lstat(targetAbs)
-	if err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			if symlinkPointsTo(targetAbs, sourceAbs) {
-				targetText, _ := os.Readlink(targetAbs)
-				if targetText == sourceAbs || dryRun {
-					return result, nil
-				}
-				if err := RemoveSymlinkTx(tx, targetAbs); err != nil {
-					return result, err
-				}
-			} else if force {
-				if dryRun {
-					return result, nil
-				}
-				if err := MoveAsideTx(tx, targetAbs); err != nil {
-					return result, err
-				}
-			} else {
-				return result, fmt.Errorf("target %s is a symlink to another source", targetAbs)
-			}
-		} else if force {
-			if dryRun {
-				return result, nil
-			}
-			if err := MoveAsideTx(tx, targetAbs); err != nil {
-				return result, err
-			}
-		} else {
-			return result, fmt.Errorf("target %s already exists", targetAbs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			action.state = linkTargetAbsent
+			return action, nil
 		}
-	} else if !os.IsNotExist(err) {
-		return result, fmt.Errorf("inspect target %s: %w", targetAbs, err)
+		return action, fmt.Errorf("inspect target %s: %w", targetAbs, err)
 	}
 
-	if dryRun {
-		return result, nil
+	if info.Mode()&os.ModeSymlink != 0 {
+		if symlinkPointsTo(targetAbs, sourceAbs) {
+			targetText, _ := os.Readlink(targetAbs)
+			if targetText == sourceAbs {
+				action.state = linkTargetAlreadyCorrect
+			} else {
+				action.state = linkTargetRelativeCorrect
+			}
+		} else {
+			if !force {
+				return action, fmt.Errorf("target %s is a symlink to another source", targetAbs)
+			}
+			action.state = linkTargetWrongSymlink
+		}
+	} else {
+		if !force {
+			return action, fmt.Errorf("target %s already exists", targetAbs)
+		}
+		action.state = linkTargetNonSymlink
 	}
-	return result, CreateSymlinkTx(tx, sourceAbs, targetAbs)
+	return action, nil
+}
+
+func (s Service) executeLinkAction(tx *Tx, action *linkAction) error {
+	switch action.state {
+	case linkTargetAbsent:
+		return CreateSymlinkTx(tx, action.sourceAbs, action.targetAbs)
+	case linkTargetAlreadyCorrect:
+		return nil
+	case linkTargetRelativeCorrect:
+		if err := RemoveSymlinkTx(tx, action.targetAbs); err != nil {
+			return err
+		}
+		return CreateSymlinkTx(tx, action.sourceAbs, action.targetAbs)
+	case linkTargetWrongSymlink, linkTargetNonSymlink:
+		if err := MoveAsideTx(tx, action.targetAbs); err != nil {
+			return err
+		}
+		return CreateSymlinkTx(tx, action.sourceAbs, action.targetAbs)
+	default:
+		return fmt.Errorf("unexpected link target state %d", action.state)
+	}
+}
+
+func (s Service) linkResults(plan *linkPlan, dryRun bool) []LinkResult {
+	results := make([]LinkResult, len(plan.actions))
+	for i, a := range plan.actions {
+		results[i] = LinkResult{
+			Package:    a.packageName,
+			Target:     a.mapping.Target,
+			SourcePath: HomeRelative(a.sourceAbs, s.Env),
+			DryRun:     dryRun,
+		}
+	}
+	return results
 }

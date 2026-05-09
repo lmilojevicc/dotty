@@ -5,10 +5,13 @@ import (
 	"os"
 )
 
-func Init(repoPath string) (string, error) {
-	repo, err := ExpandPath(repoPath)
+// InitRepo initializes a Dotfiles Repository at repoPath, creates the Manifest
+// if missing, validates an existing Manifest, records the Default Repository in
+// user config, and returns a ready-to-use Service.
+func InitRepo(repoPath string, env Env) (Service, error) {
+	repo, err := ExpandPath(repoPath, env)
 	if err != nil {
-		return "", err
+		return Service{}, err
 	}
 	if err := RunAtomic(func(tx *Tx) error {
 		if err := EnsureDirTx(tx, repo, 0o755); err != nil {
@@ -17,20 +20,20 @@ func Init(repoPath string) (string, error) {
 
 		manifestPath := ManifestPath(repo)
 		if _, err := os.Lstat(manifestPath); err == nil {
-			if _, err := LoadManifest(repo); err != nil {
+			if _, err := LoadManifest(repo, env); err != nil {
 				return err
 			}
 		} else if os.IsNotExist(err) {
-			if err := SaveManifest(tx, repo, NewManifest()); err != nil {
+			if err := SaveManifest(tx, repo, NewManifest(), env); err != nil {
 				return err
 			}
 		} else {
 			return fmt.Errorf("inspect manifest %s: %w", manifestPath, err)
 		}
 
-		return SaveConfig(tx, &Config{Repo: HomeRelative(repo)})
+		return SaveConfig(tx, env, &Config{Repo: HomeRelative(repo, env)})
 	}); err != nil {
-		return "", err
+		return Service{}, err
 	}
-	return repo, nil
+	return NewService(repo, env), nil
 }

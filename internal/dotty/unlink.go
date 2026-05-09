@@ -20,116 +20,155 @@ type UnlinkResult struct {
 	DryRun  bool
 }
 
-func (s Service) Unlink(options UnlinkOptions) ([]UnlinkResult, error) {
-	var unlinked []UnlinkResult
-	if options.DryRun {
-		manifest, err := LoadManifest(s.Repo)
-		if err != nil {
-			return nil, err
-		}
-		selected, err := ResolvePackageSelection(
-			manifest,
-			options.Packages,
-			options.Collections,
-			options.All,
-		)
-		if err != nil {
-			return nil, err
-		}
-		for _, packageName := range selected {
-			pkg := manifest.Packages[packageName]
-			for _, mapping := range pkg.Links {
-				result, err := s.unlinkMapping(nil, packageName, mapping, options.Hard, true)
-				if err != nil {
-					return nil, err
-				}
-				unlinked = append(unlinked, result)
-			}
-		}
-		return unlinked, nil
-	}
+type unlinkAction struct {
+	packageName string
+	mapping     LinkMapping
+	sourceAbs   string
+	targetAbs   string
+	hard        bool
+	state       unlinkTargetState
+}
 
+type unlinkTargetState int
+
+const (
+	unlinkTargetAbsent  unlinkTargetState = iota // nothing at target, no-op
+	unlinkTargetCorrect                          // target is expected dotty link
+)
+
+func (s Service) Unlink(options UnlinkOptions) ([]UnlinkResult, error) {
+	plan, err := s.planUnlink(options)
+	if err != nil {
+		return nil, err
+	}
+	if options.DryRun {
+		return s.unlinkResults(plan, true), nil
+	}
 	if err := RunAtomic(func(tx *Tx) error {
-		manifest, err := LoadManifest(s.Repo)
-		if err != nil {
-			return err
-		}
-		selected, err := ResolvePackageSelection(
-			manifest,
-			options.Packages,
-			options.Collections,
-			options.All,
-		)
-		if err != nil {
-			return err
-		}
-		for _, packageName := range selected {
-			pkg := manifest.Packages[packageName]
-			for _, mapping := range pkg.Links {
-				result, err := s.unlinkMapping(tx, packageName, mapping, options.Hard, false)
-				if err != nil {
-					return err
-				}
-				unlinked = append(unlinked, result)
+		for i := range plan.actions {
+			if err := s.executeUnlinkAction(tx, &plan.actions[i]); err != nil {
+				return err
 			}
 		}
 		return nil
 	}); err != nil {
 		return nil, err
 	}
-	return unlinked, nil
+	return s.unlinkResults(plan, false), nil
 }
 
-func (s Service) unlinkMapping(
-	tx *Tx,
+type unlinkPlan struct {
+	actions []unlinkAction
+}
+
+func (s Service) unlinkResults(plan *unlinkPlan, dryRun bool) []UnlinkResult {
+	results := make([]UnlinkResult, len(plan.actions))
+	for i, a := range plan.actions {
+		results[i] = UnlinkResult{
+			Package: a.packageName,
+			Target:  a.mapping.Target,
+			Hard:    a.hard,
+			DryRun:  dryRun,
+		}
+	}
+	return results
+}
+
+func (s Service) planUnlink(options UnlinkOptions) (*unlinkPlan, error) {
+	manifest, err := LoadManifest(s.Repo, s.Env)
+	if err != nil {
+		return nil, err
+	}
+	selected, err := ResolvePackageSelection(
+		manifest,
+		options.Packages,
+		options.Collections,
+		options.All,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	plan := &unlinkPlan{}
+	for _, packageName := range selected {
+		pkg := manifest.Packages[packageName]
+		for _, mapping := range pkg.Links {
+			action, err := s.classifyUnlinkAction(packageName, mapping, options.Hard)
+			if err != nil {
+				return nil, err
+			}
+			plan.actions = append(plan.actions, action)
+		}
+	}
+	return plan, nil
+}
+
+func (s Service) classifyUnlinkAction(
 	packageName string,
 	mapping LinkMapping,
 	hard bool,
-	dryRun bool,
-) (UnlinkResult, error) {
-	result := UnlinkResult{Package: packageName, Target: mapping.Target, Hard: hard, DryRun: dryRun}
+) (unlinkAction, error) {
+	action := unlinkAction{packageName: packageName, mapping: mapping, hard: hard}
+
 	sourceAbs, err := PackageSourcePath(s.Repo, packageName, mapping.Source)
 	if err != nil {
-		return result, err
+		return action, err
 	}
-	targetAbs, err := ExpandTargetPath(mapping.Target)
+	action.sourceAbs = sourceAbs
+
+	targetAbs, err := ExpandTargetPath(mapping.Target, s.Env)
 	if err != nil {
-		return result, err
+		return action, err
 	}
+	action.targetAbs = targetAbs
 
 	info, err := os.Lstat(targetAbs)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return result, nil
+			action.state = unlinkTargetAbsent
+			return action, nil
 		}
-		return result, fmt.Errorf("inspect target %s: %w", targetAbs, err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		return result, fmt.Errorf("target %s is not an expected dotty link", targetAbs)
-	}
-	if !symlinkPointsTo(targetAbs, sourceAbs) {
-		return result, fmt.Errorf("target %s is a symlink to another source", targetAbs)
+		return action, fmt.Errorf("inspect target %s: %w", targetAbs, err)
 	}
 
-	if hard {
-		if dryRun {
-			return result, nil
+	if info.Mode()&os.ModeSymlink == 0 {
+		return action, fmt.Errorf("target %s is not an expected dotty link", targetAbs)
+	}
+	if !symlinkPointsTo(targetAbs, sourceAbs) {
+		return action, fmt.Errorf("target %s is a symlink to another source", targetAbs)
+	}
+	action.state = unlinkTargetCorrect
+
+	// For soft unlink, validate that source exists and is copyable during planning
+	if !hard {
+		if exists, err := pathExists(sourceAbs); err != nil {
+			return action, err
+		} else if !exists {
+			return action, fmt.Errorf(
+				"package %q source %q is missing",
+				packageName,
+				mapping.Source,
+			)
 		}
-		return result, RemoveSymlinkTx(tx, targetAbs)
-	}
-	if exists, err := pathExists(sourceAbs); err != nil {
-		return result, err
-	} else if !exists {
-		return result, fmt.Errorf("package %q source %q is missing", packageName, mapping.Source)
-	}
-	if dryRun {
 		if err := validateCopyablePath(sourceAbs); err != nil {
-			return result, err
+			return action, err
 		}
-		return result, nil
 	}
-	if err := RemoveSymlinkTx(tx, targetAbs); err != nil {
-		return result, err
+
+	return action, nil
+}
+
+func (s Service) executeUnlinkAction(tx *Tx, action *unlinkAction) error {
+	if action.state == unlinkTargetAbsent {
+		return nil
 	}
-	return result, CopyPathTx(tx, sourceAbs, targetAbs)
+
+	if action.hard {
+		return RemoveSymlinkTx(tx, action.targetAbs)
+	}
+
+	if err := RemoveSymlinkTx(tx, action.targetAbs); err != nil {
+		return err
+	}
+	return CopyPathTx(tx, action.sourceAbs, action.targetAbs)
 }

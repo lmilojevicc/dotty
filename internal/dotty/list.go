@@ -16,7 +16,7 @@ type InventoryCollection struct {
 }
 
 func (s Service) List() (*Inventory, error) {
-	manifest, err := LoadManifest(s.Repo)
+	manifest, err := LoadManifest(s.Repo, s.Env)
 	if err != nil {
 		return nil, err
 	}

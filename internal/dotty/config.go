@@ -7,11 +7,8 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-func LoadConfig() (*Config, error) {
-	path, err := ConfigFilePath()
-	if err != nil {
-		return nil, err
-	}
+func LoadConfig(env Env) (*Config, error) {
+	path := env.ConfigFilePath()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -26,11 +23,8 @@ func LoadConfig() (*Config, error) {
 	return &cfg, nil
 }
 
-func SaveConfig(tx *Tx, cfg *Config) error {
-	path, err := ConfigFilePath()
-	if err != nil {
-		return err
-	}
+func SaveConfig(tx *Tx, env Env, cfg *Config) error {
+	path := env.ConfigFilePath()
 	if err := EnsureDirTx(tx, dirOf(path), 0o755); err != nil {
 		return err
 	}

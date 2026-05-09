@@ -15,7 +15,7 @@ import (
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
-func LoadManifest(repo string) (*Manifest, error) {
+func LoadManifest(repo string, env Env) (*Manifest, error) {
 	path := ManifestPath(repo)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -29,22 +29,22 @@ func LoadManifest(repo string) (*Manifest, error) {
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
 	manifest.normalize()
-	if err := ValidateManifest(&manifest); err != nil {
+	if err := ValidateManifest(&manifest, env); err != nil {
 		return nil, err
 	}
 	return &manifest, nil
 }
 
-func SaveManifest(tx *Tx, repo string, manifest *Manifest) error {
+func SaveManifest(tx *Tx, repo string, manifest *Manifest, env Env) error {
 	manifest.normalize()
-	if err := ValidateManifest(manifest); err != nil {
+	if err := ValidateManifest(manifest, env); err != nil {
 		return err
 	}
 	data := []byte(FormatManifest(manifest))
 	return WriteFileTx(tx, ManifestPath(repo), data, 0o644)
 }
 
-func ValidateManifest(manifest *Manifest) error {
+func ValidateManifest(manifest *Manifest, env Env) error {
 	manifest.normalize()
 	if manifest.Version != ManifestVersion {
 		return fmt.Errorf("unsupported manifest version %d", manifest.Version)
@@ -62,7 +62,7 @@ func ValidateManifest(manifest *Manifest) error {
 			if err := validateTargetPath(link.Target); err != nil {
 				return fmt.Errorf("package %q link %d: %w", name, i+1, err)
 			}
-			targetAbs, err := ExpandTargetPath(link.Target)
+			targetAbs, err := ExpandTargetPath(link.Target, env)
 			if err != nil {
 				return fmt.Errorf("package %q link %d: %w", name, i+1, err)
 			}
@@ -145,7 +145,7 @@ func FormatManifest(manifest *Manifest) string {
 	return b.String()
 }
 
-func AddManifestLink(manifest *Manifest, packageName string, link LinkMapping) error {
+func AddManifestLink(manifest *Manifest, packageName string, link LinkMapping, env Env) error {
 	manifest.normalize()
 	pkg := manifest.Packages[packageName]
 	for _, existing := range pkg.Links {
@@ -159,7 +159,7 @@ func AddManifestLink(manifest *Manifest, packageName string, link LinkMapping) e
 	}
 	pkg.Links = append(pkg.Links, link)
 	manifest.Packages[packageName] = pkg
-	return ValidateManifest(manifest)
+	return ValidateManifest(manifest, env)
 }
 
 func sortedKeys[T any](m map[string]T) []string {
