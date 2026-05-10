@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+	"github.com/spf13/cobra"
 
 	"github.com/lmilojevicc/dotty/internal/dotty"
 )
@@ -296,6 +297,13 @@ func TestRootDescriptionAndStatusVerboseHelpAreApproachable(t *testing.T) {
 	if !strings.Contains(usage, "status output") {
 		t.Fatalf("verbose help should clarify status scope, got %q", usage)
 	}
+	completion, _, err := cmd.Find([]string{"completion"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "completion <bash|zsh|fish|powershell>"; completion.Use != want {
+		t.Fatalf("completion usage mismatch: want %q, got %q", want, completion.Use)
+	}
 }
 
 func TestRepoCommandPrintsResolvedRepositoryAndConfigPath(t *testing.T) {
@@ -339,6 +347,187 @@ func TestRepoCommandUsesDottyRepoEnvironmentOverride(t *testing.T) {
 	want := "Repository: ~/env-dotfiles\nConfig: ~/.config/dotty/config.toml\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+}
+
+func TestCompletionCommandGeneratesShellScripts(t *testing.T) {
+	tests := []struct {
+		shell string
+		want  string
+	}{
+		{shell: "bash", want: "__start_dotty"},
+		{shell: "zsh", want: "#compdef dotty"},
+		{shell: "fish", want: "complete -c dotty"},
+		{shell: "powershell", want: "Register-ArgumentCompleter"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.shell, func(t *testing.T) {
+			out, errOut, err := executeCommand("completion", tt.shell)
+			if err != nil {
+				t.Fatalf("completion %s failed: %v\nstderr: %s", tt.shell, err, errOut)
+			}
+			if errOut != "" {
+				t.Fatalf("expected no stderr, got %q", errOut)
+			}
+			requireOutputContains(t, out, tt.want)
+		})
+	}
+}
+
+func TestPackageCommandsCompleteManifestPackages(t *testing.T) {
+	_, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+
+	for _, command := range []string{"link", "unlink", "status"} {
+		t.Run(command, func(t *testing.T) {
+			choices, errOut, err := executeCompletion("--repo", repo, command, "")
+			if err != nil {
+				t.Fatalf("%s completion failed: %v\nstderr: %s", command, err, errOut)
+			}
+			requireChoices(t, choices, []string{"tmux", "zsh"})
+
+			choices, errOut, err = executeCompletion("--repo", repo, command, "t")
+			if err != nil {
+				t.Fatalf("%s prefix completion failed: %v\nstderr: %s", command, err, errOut)
+			}
+			requireChoices(t, choices, []string{"tmux"})
+		})
+	}
+}
+
+func TestPackageCompletionOmitsAlreadySelectedPackages(t *testing.T) {
+	_, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+
+	choices, errOut, err := executeCompletion("--repo", repo, "link", "tmux", "")
+	if err != nil {
+		t.Fatalf("link completion failed: %v\nstderr: %s", err, errOut)
+	}
+	requireChoices(t, choices, []string{"zsh"})
+}
+
+func TestCollectionFlagCompletesManifestCollections(t *testing.T) {
+	_, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+
+[collections.desktop]
+packages = ["zsh"]
+
+[collections.terminal]
+packages = ["tmux", "zsh"]
+`)
+
+	for _, command := range []string{"link", "unlink"} {
+		t.Run(command, func(t *testing.T) {
+			choices, errOut, err := executeCompletion("--repo", repo, command, "--collection", "")
+			if err != nil {
+				t.Fatalf("%s collection completion failed: %v\nstderr: %s", command, err, errOut)
+			}
+			requireChoices(t, choices, []string{"desktop", "terminal"})
+
+			choices, errOut, err = executeCompletion(
+				"--repo",
+				repo,
+				command,
+				"--collection",
+				"term",
+			)
+			if err != nil {
+				t.Fatalf(
+					"%s collection prefix completion failed: %v\nstderr: %s",
+					command,
+					err,
+					errOut,
+				)
+			}
+			requireChoices(t, choices, []string{"terminal"})
+		})
+	}
+}
+
+func TestAddPackageArgDoesNotCompleteManifestPackages(t *testing.T) {
+	cmd := NewRootCommand(io.Discard, io.Discard)
+	addCmd, _, err := cmd.Find([]string{"add"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addCmd.ValidArgsFunction == nil {
+		t.Fatalf("add command missing completion function")
+	}
+
+	choices, directive := addCmd.ValidArgsFunction(addCmd, []string{"~/.config/tmux"}, "t")
+	requireChoices(t, choices, nil)
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf(
+			"unexpected directive: want %d, got %d",
+			cobra.ShellCompDirectiveNoFileComp,
+			directive,
+		)
+	}
+}
+
+func TestPathArgsAndRepoFlagCompleteDirectories(t *testing.T) {
+	cmd := NewRootCommand(io.Discard, io.Discard)
+	initCmd, _, err := cmd.Find([]string{"init"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initCmd.ValidArgsFunction == nil {
+		t.Fatalf("init command missing completion function")
+	}
+	_, directive := initCmd.ValidArgsFunction(initCmd, nil, "")
+	if directive != cobra.ShellCompDirectiveFilterDirs {
+		t.Fatalf(
+			"unexpected init directive: want %d, got %d",
+			cobra.ShellCompDirectiveFilterDirs,
+			directive,
+		)
+	}
+
+	completion, ok := cmd.GetFlagCompletionFunc("repo")
+	if !ok {
+		t.Fatalf("--repo flag missing completion function")
+	}
+	_, directive = completion(cmd, nil, "")
+	if directive != cobra.ShellCompDirectiveFilterDirs {
+		t.Fatalf(
+			"unexpected --repo directive: want %d, got %d",
+			cobra.ShellCompDirectiveFilterDirs,
+			directive,
+		)
 	}
 }
 
@@ -781,9 +970,42 @@ func executeCommand(args ...string) (stdout string, stderr string, err error) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	cmd := NewRootCommand(&out, &errOut)
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
 	cmd.SetArgs(args)
 	err = cmd.Execute()
 	return stripANSI(out.String()), stripANSI(errOut.String()), err
+}
+
+func executeCompletion(args ...string) (choices []string, stderr string, err error) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	cmd := NewRootCommand(&out, &errOut)
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs(append([]string{cobra.ShellCompNoDescRequestCmd}, args...))
+	err = cmd.Execute()
+	return completionChoices(stripANSI(out.String())), stripANSI(errOut.String()), err
+}
+
+func completionChoices(output string) []string {
+	var choices []string
+	for _, line := range strings.Split(output, "\n") {
+		if line == "" || strings.HasPrefix(line, ":") ||
+			strings.HasPrefix(line, "Completion ended") {
+			continue
+		}
+		choice := strings.Split(line, "\t")[0]
+		choices = append(choices, choice)
+	}
+	return choices
+}
+
+func requireChoices(t *testing.T, got []string, want []string) {
+	t.Helper()
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected completions\nwant: %#v\ngot:  %#v", want, got)
+	}
 }
 
 func writeManifest(t *testing.T, repo string, content string) {

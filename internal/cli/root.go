@@ -37,6 +37,7 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 	}
 	cmd.PersistentFlags().
 		StringVar(&app.repoFlag, "repo", "", "dotfiles repository path (overrides DOTTY_REPO and config)")
+	mustRegisterFlagCompletion(cmd, "repo", completeDirectories)
 	cmd.AddCommand(app.versionCommand())
 	cmd.AddCommand(app.initCommand())
 	cmd.AddCommand(app.addCommand())
@@ -45,6 +46,7 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 	cmd.AddCommand(app.statusCommand())
 	cmd.AddCommand(app.listCommand())
 	cmd.AddCommand(app.repoCommand())
+	cmd.AddCommand(app.completionCommand())
 	return cmd
 }
 
@@ -58,9 +60,10 @@ func (a *app) service() (dotty.Service, error) {
 
 func (a *app) versionCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "version",
-		Short: "Print the version number",
-		Args:  noArgs,
+		Use:               "version",
+		Short:             "Print the version number",
+		Args:              noArgs,
+		ValidArgsFunction: cobra.NoFileCompletions,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			return nil
 		},
@@ -72,9 +75,10 @@ func (a *app) versionCommand() *cobra.Command {
 
 func (a *app) initCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "init [<path>]",
-		Short: "Initialize a dotty repository and remember it as the default",
-		Args:  maximumArgs(1),
+		Use:               "init [<path>]",
+		Short:             "Initialize a dotty repository and remember it as the default",
+		Args:              maximumArgs(1),
+		ValidArgsFunction: completeInitArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "."
 			if len(args) == 1 {
@@ -98,9 +102,10 @@ func (a *app) initCommand() *cobra.Command {
 func (a *app) addCommand() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
-		Use:   "add <path> <package>",
-		Short: "Adopt an existing file, directory, or symlink target into a package",
-		Args:  exactArgs(2),
+		Use:               "add <path> <package>",
+		Short:             "Adopt an existing file, directory, or symlink target into a package",
+		Args:              exactArgs(2),
+		ValidArgsFunction: completeAddArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -126,9 +131,10 @@ func (a *app) linkCommand() *cobra.Command {
 	var force bool
 	var dryRun bool
 	cmd := &cobra.Command{
-		Use:   "link <package>... | --all | --collection <collection>",
-		Short: "Create links for packages, all packages, or an explicit collection",
-		Args:  selectionArgs(&collections, &all),
+		Use:               "link <package>... | --all | --collection <collection>",
+		Short:             "Create links for packages, all packages, or an explicit collection",
+		Args:              selectionArgs(&collections, &all),
+		ValidArgsFunction: a.completePackages,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -153,6 +159,7 @@ func (a *app) linkCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&all, "all", false, "link all packages")
 	cmd.Flags().
 		StringArrayVarP(&collections, "collection", "c", nil, "collection to link (can be repeated)")
+	mustRegisterFlagCompletion(cmd, "collection", a.completeCollections)
 	cmd.Flags().BoolVar(&force, "force", false, "destructively replace target conflicts")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
 	return cmd
@@ -164,9 +171,10 @@ func (a *app) unlinkCommand() *cobra.Command {
 	var hard bool
 	var dryRun bool
 	cmd := &cobra.Command{
-		Use:   "unlink <package>... | --all | --collection <collection>",
-		Short: "Remove links for packages, all packages, or an explicit collection",
-		Args:  selectionArgs(&collections, &all),
+		Use:               "unlink <package>... | --all | --collection <collection>",
+		Short:             "Remove links for packages, all packages, or an explicit collection",
+		Args:              selectionArgs(&collections, &all),
+		ValidArgsFunction: a.completePackages,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -191,6 +199,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&all, "all", false, "unlink all packages")
 	cmd.Flags().
 		StringArrayVarP(&collections, "collection", "c", nil, "collection to unlink (can be repeated)")
+	mustRegisterFlagCompletion(cmd, "collection", a.completeCollections)
 	cmd.Flags().
 		BoolVar(&hard, "hard", false, "remove expected links without leaving target-side copies")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
@@ -200,9 +209,10 @@ func (a *app) unlinkCommand() *cobra.Command {
 func (a *app) statusCommand() *cobra.Command {
 	var verbose bool
 	cmd := &cobra.Command{
-		Use:   "status [<package>...]",
-		Short: "Show linked, unlinked, conflict, missing-source, empty, partial, and untracked states",
-		Args:  cobra.ArbitraryArgs,
+		Use:               "status [<package>...]",
+		Short:             "Show linked, unlinked, conflict, missing-source, empty, partial, and untracked states",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: a.completePackages,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -223,9 +233,10 @@ func (a *app) statusCommand() *cobra.Command {
 
 func (a *app) listCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "list",
-		Short: "List packages and collections defined in the manifest",
-		Args:  noArgs,
+		Use:               "list",
+		Short:             "List packages and collections defined in the manifest",
+		Args:              noArgs,
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -243,9 +254,10 @@ func (a *app) listCommand() *cobra.Command {
 
 func (a *app) repoCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "repo",
-		Short: "Show the resolved dotfiles repository and config path",
-		Args:  noArgs,
+		Use:               "repo",
+		Short:             "Show the resolved dotfiles repository and config path",
+		Args:              noArgs,
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repo, err := dotty.ResolveRepo(a.repoFlag, a.env)
 			if err != nil {
