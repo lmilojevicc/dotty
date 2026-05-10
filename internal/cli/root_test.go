@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -282,6 +283,65 @@ func TestVersionCommandPrintsVersion(t *testing.T) {
 	}
 }
 
+func TestRootDescriptionAndStatusVerboseHelpAreApproachable(t *testing.T) {
+	cmd := NewRootCommand(io.Discard, io.Discard)
+	if want := "Sync configuration files across machines using a manifest"; cmd.Short != want {
+		t.Fatalf("root short mismatch: want %q, got %q", want, cmd.Short)
+	}
+	status, _, err := cmd.Find([]string{"status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage := status.Flags().Lookup("verbose").Usage
+	if !strings.Contains(usage, "status output") {
+		t.Fatalf("verbose help should clarify status scope, got %q", usage)
+	}
+}
+
+func TestRepoCommandPrintsResolvedRepositoryAndConfigPath(t *testing.T) {
+	_, repo := setupCLITest(t)
+
+	out, errOut, err := executeCommand("--repo", repo, "repo")
+	if err != nil {
+		t.Fatalf("repo failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "Repository: ~/dotfiles\nConfig: ~/.config/dotty/config.toml\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+}
+
+func TestRepoCommandUsesConfiguredRepository(t *testing.T) {
+	setupCLITest(t)
+
+	out, errOut, err := executeCommand("repo")
+	if err != nil {
+		t.Fatalf("repo failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "Repository: ~/dotfiles\nConfig: ~/.config/dotty/config.toml\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+}
+
+func TestRepoCommandUsesDottyRepoEnvironmentOverride(t *testing.T) {
+	home := setupCLIHomeOnly(t)
+	repo := filepath.Join(home, "env-dotfiles")
+	t.Setenv("DOTTY_REPO", repo)
+
+	out, errOut, err := executeCommand("repo")
+	if err != nil {
+		t.Fatalf("repo failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "Repository: ~/env-dotfiles\nConfig: ~/.config/dotty/config.toml\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+}
+
 func TestListPrintsPackagesAndCollections(t *testing.T) {
 	_, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
@@ -365,7 +425,7 @@ links = [
 		t.Fatalf("status failed: %v\nstderr: %s", err, errOut)
 	}
 	want := fmt.Sprintf(
-		"%-24s %s\n%-24s %s\n\n%s\n  %s\n  %s\n",
+		"Repository: ~/dotfiles\n\n%-24s %s\n%-24s %s\n\n%s\n  %s\n  %s\n\nSummary: 2 packages: 1 linked, 1 unlinked; 2 untracked\n",
 		"tmux",
 		"UNLINKED",
 		"zsh",
@@ -383,7 +443,7 @@ links = [
 		t.Fatalf("status --verbose failed: %v\nstderr: %s", err, errOut)
 	}
 	want = fmt.Sprintf(
-		"%-18s %-20s %-36s %s\n%-18s %-20s %-36s %s\n\n%-18s %-20s %-36s %s\n%-18s %-20s %-36s %s\n",
+		"Repository: ~/dotfiles\n\n%-18s %-20s %-36s %s\n%-18s %-20s %-36s %s\n\n%-18s %-20s %-36s %s\n%-18s %-20s %-36s %s\n\nSummary: 2 packages: 1 linked, 1 unlinked; 2 untracked\n",
 		"tmux",
 		".",
 		"~/.config/tmux",

@@ -141,10 +141,18 @@ func (s Service) classifyUnlinkAction(
 	}
 
 	if info.Mode()&os.ModeSymlink == 0 {
-		return action, fmt.Errorf("target %s is not an expected dotty link", targetAbs)
+		return action, fmt.Errorf(
+			"target %s is not an expected dotty link (inspect with `dotty status` or remove it manually)",
+			targetAbs,
+		)
 	}
 	if !symlinkPointsTo(targetAbs, sourceAbs) {
-		return action, fmt.Errorf("target %s is a symlink to another source", targetAbs)
+		targetText, _ := os.Readlink(targetAbs)
+		return action, fmt.Errorf(
+			"target %s is a symlink to another source %s (restore the expected Link or remove it manually)",
+			targetAbs,
+			targetText,
+		)
 	}
 	action.state = unlinkTargetCorrect
 
@@ -154,7 +162,7 @@ func (s Service) classifyUnlinkAction(
 			return action, err
 		} else if !exists {
 			return action, fmt.Errorf(
-				"package %q source %q is missing",
+				"package %q source %q is missing (restore the Package Source or use --hard to remove only the Link)",
 				packageName,
 				mapping.Source,
 			)

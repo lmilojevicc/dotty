@@ -161,6 +161,18 @@ func TestValidateManifestRejectsInvalidManifestShape(t *testing.T) {
 	}
 }
 
+func TestValidateManifestDuplicateTargetErrorIncludesActionableHint(t *testing.T) {
+	home, env := setupHome(t)
+	manifest := &Manifest{Version: ManifestVersion, Packages: map[string]Package{
+		"a": {Links: []LinkMapping{{Source: ".zshrc", Target: "~/.zshrc"}}},
+		"b": {Links: []LinkMapping{{Source: ".zshrc", Target: filepath.Join(home, ".zshrc")}}},
+	}}
+
+	err := ValidateManifest(manifest, env)
+	requireErrorContains(t, err, "mapped more than once")
+	requireErrorContains(t, err, "edit dotty.toml")
+}
+
 func TestAddManifestLinkCreatesDedupesAndRejectsTargetReuse(t *testing.T) {
 	_, env := setupHome(t)
 	manifest := NewManifest()
@@ -177,6 +189,11 @@ func TestAddManifestLinkCreatesDedupesAndRejectsTargetReuse(t *testing.T) {
 		t,
 		AddManifestLink(manifest, "zsh", LinkMapping{Source: ".zshenv", Target: "~/.zshrc"}, env),
 		"already maps target",
+	)
+	requireErrorContains(
+		t,
+		AddManifestLink(manifest, "zsh", LinkMapping{Source: ".zshenv", Target: "~/.zshrc"}, env),
+		"edit dotty.toml",
 	)
 }
 

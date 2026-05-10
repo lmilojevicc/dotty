@@ -16,7 +16,7 @@ func ResolvePackageSelection(
 		return sortedKeys(manifest.Packages), nil
 	}
 	if len(packages) == 0 && len(collections) == 0 {
-		return nil, fmt.Errorf("select at least one package or collection")
+		return nil, fmt.Errorf("select at least one package or collection (or use --all)")
 	}
 	seen := map[string]bool{}
 	selected := []string{}
@@ -25,7 +25,7 @@ func ResolvePackageSelection(
 			return err
 		}
 		if _, ok := manifest.Packages[name]; !ok {
-			return fmt.Errorf("unknown package %q", name)
+			return fmt.Errorf("unknown package %q (run `dotty list` to see packages)", name)
 		}
 		if !seen[name] {
 			seen[name] = true
@@ -44,7 +44,10 @@ func ResolvePackageSelection(
 		}
 		collection, ok := manifest.Collections[collectionName]
 		if !ok {
-			return nil, fmt.Errorf("unknown collection %q", collectionName)
+			return nil, fmt.Errorf(
+				"unknown collection %q (run `dotty list` to see collections)",
+				collectionName,
+			)
 		}
 		for _, packageName := range collection.Packages {
 			if err := addPackage(packageName); err != nil {

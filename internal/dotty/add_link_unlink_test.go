@@ -49,6 +49,7 @@ func TestAddRejectsMissingTargetWithoutChangingManifestOrRepository(t *testing.T
 
 	_, err = NewService(repo, env).Add(filepath.Join(home, ".missing"), "zsh")
 	requireErrorContains(t, err, "does not exist")
+	requireErrorContains(t, err, "choose an existing Target Path")
 
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 	requireNoPath(t, filepath.Join(repo, "zsh"))

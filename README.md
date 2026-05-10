@@ -3,13 +3,13 @@
 
 # Dotty
 
-_Manage dotfiles with explicit TOML link mappings._
+_Sync configuration files across machines using a manifest._
 
 [Overview](#overview) | [Features](#features) | [Getting Started](#getting-started) | [Installation](#installation) | [Workflow](#basic-workflow) | [Manifest](#manifest) | [Commands](#commands) | [Development](#development)
 
 </div>
 
-Dotty is a Go CLI for managing your configuration files. It stores managed content as **Packages** in a **Dotfiles Repository**, records each **Package Source** to **Target Path** relationship in `dotty.toml`, and creates absolute symlinks back to the repository.
+Dotty is a Go CLI for syncing configuration files across machines. It stores managed content as **Packages** in a **Dotfiles Repository**, records each **Package Source** to **Target Path** relationship in `dotty.toml`, and creates absolute symlinks back to the repository.
 
 It is intentionally explicit: Dotty does not infer state from directory layout, hide metadata in target folders, or guess whether local files are safe to replace.
 
@@ -97,6 +97,7 @@ dotty link --all
 dotty unlink --all
 
 # Inspect Manifest inventory and filesystem state
+dotty repo
 dotty list
 dotty status
 dotty status --verbose
@@ -147,10 +148,13 @@ dotty unlink --collection terminal
 | `dotty add <path> <package>`                                     | Adopt an existing file, directory, or symlink target into a Package. | `--dry-run`                                     |
 | `dotty link <package>... \| --all \| --collection <collection>`   | Create Links for selected Packages.                                  | `--all`, `--collection`, `--force`, `--dry-run` |
 | `dotty unlink <package>... \| --all \| --collection <collection>` | Remove Links for selected Packages.                                  | `--all`, `--collection`, `--hard`, `--dry-run`  |
-| `dotty status [<package>...]`                                    | Show package state inferred from the Manifest and filesystem.        | `--verbose`                                     |
+| `dotty status [<package>...]`                                    | Show package state inferred from the Manifest and filesystem.        | `--verbose`, `-v`                               |
 | `dotty list`                                                     | List Packages and Collections defined in the Manifest.               | None                                            |
+| `dotty repo`                                                     | Show the resolved Dotfiles Repository and config file path.           | None                                            |
 
 All commands accept the global `--repo` flag when they need to operate on a specific Dotfiles Repository.
+
+`dotty status` prints the resolved Dotfiles Repository, package states, untracked repository content, and a summary count. Use `dotty status --verbose` or `dotty status -v` for per-Link Mapping status; `-v` is scoped to `status`, while the version flag is `--version` or `dotty version`.
 
 ## Status States
 

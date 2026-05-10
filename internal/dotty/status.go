@@ -21,6 +21,7 @@ const (
 )
 
 type StatusReport struct {
+	RepoPath  string
 	Packages  []PackageStatus
 	Untracked []UntrackedItem
 }
@@ -56,13 +57,16 @@ func (s Service) Status(packageFilter []string) (*StatusReport, error) {
 				return nil, err
 			}
 			if _, ok := manifest.Packages[name]; !ok {
-				return nil, fmt.Errorf("unknown package %q", name)
+				return nil, fmt.Errorf(
+					"unknown package %q (run `dotty list` to see packages)",
+					name,
+				)
 			}
 			selected = append(selected, name)
 		}
 	}
 
-	report := &StatusReport{}
+	report := &StatusReport{RepoPath: HomeRelative(s.Repo, s.Env)}
 	for _, packageName := range selected {
 		pkg := manifest.Packages[packageName]
 		status := PackageStatus{Name: packageName}

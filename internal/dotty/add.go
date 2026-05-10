@@ -78,7 +78,10 @@ func (s Service) AddWithOptions(options AddOptions) (*AddResult, error) {
 					return err
 				}
 				if info.Mode()&os.ModeSymlink == 0 {
-					return fmt.Errorf("target %s still exists and is not a symlink", plan.targetAbs)
+					return fmt.Errorf(
+						"target %s still exists and is not a symlink (remove or move it aside before adding)",
+						plan.targetAbs,
+					)
 				}
 				if err := RemoveSymlinkTx(tx, plan.targetAbs); err != nil {
 					return err
@@ -118,7 +121,10 @@ func (s Service) planAdd(
 	targetInfo, err := os.Lstat(targetAbs)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("target %s does not exist", targetAbs)
+			return nil, fmt.Errorf(
+				"target %s does not exist (choose an existing Target Path)",
+				targetAbs,
+			)
 		}
 		return nil, fmt.Errorf("inspect target %s: %w", targetAbs, err)
 	}
@@ -154,10 +160,16 @@ func (s Service) planAdd(
 	}
 	if destExists {
 		if !sameExistingPath(dest, adoptPath) {
-			return nil, fmt.Errorf("repo-side package source %s already exists", dest)
+			return nil, fmt.Errorf(
+				"repo-side package source %s already exists (remove or rename the existing Package Source, or choose a different Package)",
+				dest,
+			)
 		}
 		if !symlinkAdoption {
-			return nil, fmt.Errorf("target %s still exists and is not a symlink", targetAbs)
+			return nil, fmt.Errorf(
+				"target %s still exists and is not a symlink (remove or move it aside before adding)",
+				targetAbs,
+			)
 		}
 	} else if symlinkAdoption {
 		repoResolved, err := filepath.EvalSymlinks(s.Repo)

@@ -117,7 +117,11 @@ func (s Service) classifyLinkAction(
 	if exists, err := pathExists(sourceAbs); err != nil {
 		return action, err
 	} else if !exists {
-		return action, fmt.Errorf("package %q source %q is missing", packageName, mapping.Source)
+		return action, fmt.Errorf(
+			"package %q source %q is missing (restore the Package Source or remove the Link Mapping from dotty.toml)",
+			packageName,
+			mapping.Source,
+		)
 	}
 
 	targetAbs, err := ExpandTargetPath(mapping.Target, s.Env)
@@ -145,13 +149,21 @@ func (s Service) classifyLinkAction(
 			}
 		} else {
 			if !force {
-				return action, fmt.Errorf("target %s is a symlink to another source", targetAbs)
+				targetText, _ := os.Readlink(targetAbs)
+				return action, fmt.Errorf(
+					"target %s is a symlink to another source %s (use --force to replace it)",
+					targetAbs,
+					targetText,
+				)
 			}
 			action.state = linkTargetWrongSymlink
 		}
 	} else {
 		if !force {
-			return action, fmt.Errorf("target %s already exists", targetAbs)
+			return action, fmt.Errorf(
+				"target %s already exists (use --force to move it aside and create the Link)",
+				targetAbs,
+			)
 		}
 		action.state = linkTargetNonSymlink
 	}

@@ -22,7 +22,7 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 	app := &app{out: out, err: errOut}
 	cmd := &cobra.Command{
 		Use:           "dotty",
-		Short:         "Manage dotfiles with explicit TOML link mappings",
+		Short:         "Sync configuration files across machines using a manifest",
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -44,6 +44,7 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 	cmd.AddCommand(app.unlinkCommand())
 	cmd.AddCommand(app.statusCommand())
 	cmd.AddCommand(app.listCommand())
+	cmd.AddCommand(app.repoCommand())
 	return cmd
 }
 
@@ -215,7 +216,8 @@ func (a *app) statusCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show per-link mapping status")
+	cmd.Flags().
+		BoolVarP(&verbose, "verbose", "v", false, "show detailed status output per Link Mapping")
 	return cmd
 }
 
@@ -234,6 +236,31 @@ func (a *app) listCommand() *cobra.Command {
 				return err
 			}
 			renderInventory(a.out, inventory)
+			return nil
+		},
+	}
+}
+
+func (a *app) repoCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "repo",
+		Short: "Show the resolved dotfiles repository and config path",
+		Args:  noArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			repo, err := dotty.ResolveRepo(a.repoFlag, a.env)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(
+				a.out,
+				"Repository: %s\n",
+				pathStyle.Render(dotty.HomeRelative(repo, a.env)),
+			)
+			fmt.Fprintf(
+				a.out,
+				"Config: %s\n",
+				pathStyle.Render(dotty.HomeRelative(a.env.ConfigFilePath(), a.env)),
+			)
 			return nil
 		},
 	}

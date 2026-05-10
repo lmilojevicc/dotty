@@ -69,7 +69,7 @@ func ValidateManifest(manifest *Manifest, env Env) error {
 			key := filepath.Clean(targetAbs)
 			if prev, ok := targets[key]; ok {
 				return fmt.Errorf(
-					"target %q is mapped more than once (%s and %s)",
+					"target %q is mapped more than once (%s and %s) (edit dotty.toml so each Target Path appears once)",
 					link.Target,
 					prev,
 					name,
@@ -154,7 +154,11 @@ func AddManifestLink(manifest *Manifest, packageName string, link LinkMapping, e
 			return nil
 		}
 		if existing.Target == link.Target {
-			return fmt.Errorf("package %q already maps target %q", packageName, link.Target)
+			return fmt.Errorf(
+				"package %q already maps target %q (edit dotty.toml to change the existing Link Mapping)",
+				packageName,
+				link.Target,
+			)
 		}
 	}
 	pkg.Links = append(pkg.Links, link)

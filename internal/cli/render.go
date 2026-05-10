@@ -20,6 +20,15 @@ var stateStyles = map[dotty.State]lipgloss.Style{
 	dotty.StateUntracked:     lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true),
 }
 
+const (
+	// Package summaries use one compact name column followed by state.
+	statusPackageColumnWidth = 24
+	// Verbose status preserves stable columns without table borders.
+	verbosePackageColumnWidth = 18
+	verboseSourceColumnWidth  = 20
+	verboseTargetColumnWidth  = 36
+)
+
 func renderAddResult(out io.Writer, result *dotty.AddResult) {
 	verb := "added"
 	if result.DryRun {
@@ -78,12 +87,14 @@ func renderUnlinkResults(out io.Writer, results []dotty.UnlinkResult) {
 }
 
 func renderStatus(out io.Writer, report *dotty.StatusReport, verbose bool) {
+	renderStatusHeader(out, report)
 	if verbose {
 		renderVerboseStatus(out, report)
+		renderStatusSummary(out, report)
 		return
 	}
 	for _, pkg := range report.Packages {
-		renderPadded(out, pkg.Name, packageStyle, 24)
+		renderPadded(out, pkg.Name, packageStyle, statusPackageColumnWidth)
 		fmt.Fprintf(out, " %s\n", renderState(pkg.State))
 	}
 	if len(report.Untracked) > 0 {
@@ -95,6 +106,7 @@ func renderStatus(out io.Writer, report *dotty.StatusReport, verbose bool) {
 			fmt.Fprintf(out, "  %s\n", pathStyle.Render(item.Path))
 		}
 	}
+	renderStatusSummary(out, report)
 }
 
 func renderVerboseStatus(out io.Writer, report *dotty.StatusReport) {
@@ -118,21 +130,87 @@ func renderVerboseStatus(out io.Writer, report *dotty.StatusReport) {
 }
 
 func renderVerboseStatusRow(out io.Writer, packageName, source, target string, state dotty.State) {
-	renderPadded(out, packageName, packageStyle, 18)
+	renderPadded(out, packageName, packageStyle, verbosePackageColumnWidth)
 	fmt.Fprint(out, " ")
-	renderPadded(out, source, sourceStyle, 20)
+	renderPadded(out, source, sourceStyle, verboseSourceColumnWidth)
 	fmt.Fprint(out, " ")
-	renderPadded(out, target, pathStyle, 36)
+	renderPadded(out, target, pathStyle, verboseTargetColumnWidth)
 	fmt.Fprintf(out, " %s\n", renderState(state))
 }
 
 func renderVerboseUntrackedRow(out io.Writer, path string, state dotty.State) {
-	renderPadded(out, "-", mutedStyle, 18)
+	renderPadded(out, "-", mutedStyle, verbosePackageColumnWidth)
 	fmt.Fprint(out, " ")
-	renderPadded(out, path, sourceStyle, 20)
+	renderPadded(out, path, sourceStyle, verboseSourceColumnWidth)
 	fmt.Fprint(out, " ")
-	renderPadded(out, "-", mutedStyle, 36)
+	renderPadded(out, "-", mutedStyle, verboseTargetColumnWidth)
 	fmt.Fprintf(out, " %s\n", renderState(state))
+}
+
+func renderStatusHeader(out io.Writer, report *dotty.StatusReport) {
+	if report.RepoPath == "" {
+		return
+	}
+	fmt.Fprintf(out, "Repository: %s\n\n", pathStyle.Render(report.RepoPath))
+}
+
+func renderStatusSummary(out io.Writer, report *dotty.StatusReport) {
+	fmt.Fprintln(out)
+	packageCount := len(report.Packages)
+	parts := summarizePackageStates(report.Packages)
+	summary := fmt.Sprintf(
+		"Summary: %d %s",
+		packageCount,
+		pluralize(packageCount, "package", "packages"),
+	)
+	if len(parts) > 0 {
+		summary += ": " + strings.Join(parts, ", ")
+	}
+	if len(report.Untracked) > 0 {
+		summary += fmt.Sprintf(
+			"; %d %s",
+			len(report.Untracked),
+			pluralize(len(report.Untracked), "untracked", "untracked"),
+		)
+	}
+	fmt.Fprintln(out, mutedStyle.Render(summary))
+}
+
+func summarizePackageStates(packages []dotty.PackageStatus) []string {
+	counts := map[dotty.State]int{}
+	for _, pkg := range packages {
+		counts[pkg.State]++
+	}
+	ordered := []struct {
+		state    dotty.State
+		singular string
+		plural   string
+	}{
+		{dotty.StateLinked, "linked", "linked"},
+		{dotty.StateUnlinked, "unlinked", "unlinked"},
+		{dotty.StateConflict, "conflict", "conflicts"},
+		{dotty.StateMissingSource, "missing source", "missing sources"},
+		{dotty.StatePartial, "partial", "partial"},
+		{dotty.StateEmpty, "empty", "empty"},
+	}
+	parts := []string{}
+	for _, item := range ordered {
+		count := counts[item.state]
+		if count > 0 {
+			parts = append(
+				parts,
+				fmt.Sprintf("%d %s", count, pluralize(count, item.singular, item.plural)),
+			)
+		}
+	}
+	return parts
+}
+
+func pluralize(count int, singular, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
 }
 
 func renderPadded(out io.Writer, text string, style lipgloss.Style, width int) {

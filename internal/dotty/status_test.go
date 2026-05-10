@@ -145,4 +145,5 @@ links = []
 
 	_, err := NewService(repo, env).Status([]string{"tmux"})
 	requireErrorContains(t, err, "unknown package")
+	requireErrorContains(t, err, "dotty list")
 }
