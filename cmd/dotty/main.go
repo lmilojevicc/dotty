@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/lmilojevicc/dotty/internal/cli"
@@ -13,7 +12,7 @@ func main() {
 	cli.SetVersion(version)
 	cmd := cli.NewRootCommand(os.Stdout, os.Stderr)
 	if err := cmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		cli.RenderError(os.Stderr, err)
 		os.Exit(1)
 	}
 }

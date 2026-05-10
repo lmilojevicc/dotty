@@ -306,6 +306,159 @@ func TestRootDescriptionAndStatusVerboseHelpAreApproachable(t *testing.T) {
 	}
 }
 
+func TestHelpOutputUsesConsistentSections(t *testing.T) {
+	out, errOut, err := executeCommand("--help")
+	if err != nil {
+		t.Fatalf("help failed: %v\nstderr: %s", err, errOut)
+	}
+
+	for _, want := range []string{
+		"Sync configuration files across machines using a manifest\n\n",
+		"Usage:\n  dotty [command]\n",
+		"Commands:\n",
+		"Options:\n",
+		"Global options:\n",
+		"Use `dotty [command] --help` for more information about a command.\n",
+	} {
+		requireOutputContains(t, out, want)
+	}
+	optionsStart := strings.Index(out, "Options:")
+	globalStart := strings.Index(out, "Global options:")
+	if optionsStart == -1 || globalStart == -1 || optionsStart > globalStart {
+		t.Fatalf("expected Options before Global options, got %q", out)
+	}
+	if strings.Contains(out[optionsStart:globalStart], "--repo") {
+		t.Fatalf("root persistent --repo flag should render under Global options, got %q", out)
+	}
+	if !strings.Contains(out[globalStart:], "--repo string") {
+		t.Fatalf("Global options should include --repo, got %q", out)
+	}
+	for _, unwanted := range []string{"Available Commands:", "Flags:", "Global Flags:"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("help should not contain %q, got %q", unwanted, out)
+		}
+	}
+}
+
+func TestCommandHelpUsesOptionsAndGlobalOptions(t *testing.T) {
+	out, errOut, err := executeCommand("list", "--help")
+	if err != nil {
+		t.Fatalf("list help failed: %v\nstderr: %s", err, errOut)
+	}
+
+	for _, want := range []string{
+		"List packages and collections defined in the manifest\n\n",
+		"Usage:\n  dotty list [flags]\n",
+		"Options:\n",
+		"Global options:\n",
+	} {
+		requireOutputContains(t, out, want)
+	}
+	for _, unwanted := range []string{"Flags:", "Global Flags:"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("command help should not contain %q, got %q", unwanted, out)
+		}
+	}
+}
+
+func TestHelpOutputStylesSectionHeadings(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
+
+	out, errOut, err := executeCommandRaw("--help")
+	if err != nil {
+		t.Fatalf("help failed: %v\nstderr: %s", err, errOut)
+	}
+	if !strings.Contains(out, "\x1b[") {
+		t.Fatalf("expected styled help output, got %q", out)
+	}
+	if !strings.Contains(stripANSI(out), "Usage:\n  dotty [command]\n") {
+		t.Fatalf("styled help should preserve stripped text, got %q", stripANSI(out))
+	}
+}
+
+func TestRenderErrorFormatsUsageAndHints(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "usage",
+			err:  fmt.Errorf("usage: dotty link <package>... | --all | --collection <collection>"),
+			want: "error: invalid arguments\n" +
+				"  usage: dotty link <package>... | --all | --collection <collection>\n",
+		},
+		{
+			name: "hint",
+			err:  fmt.Errorf("unknown package %q (run `dotty list` to see packages)", "tmux"),
+			want: "error: unknown package \"tmux\"\n" +
+				"hint: run `dotty list` to see packages\n",
+		},
+		{
+			name: "semicolon hint",
+			err: fmt.Errorf(
+				"manifest not found at /tmp/dotfiles/dotty.toml; run `dotty init /tmp/dotfiles`",
+			),
+			want: "error: manifest not found at /tmp/dotfiles/dotty.toml\n" +
+				"hint: run `dotty init /tmp/dotfiles`\n",
+		},
+		{
+			name: "choose hint",
+			err:  fmt.Errorf("target /tmp/missing does not exist (choose an existing Target Path)"),
+			want: "error: target /tmp/missing does not exist\n" +
+				"hint: choose an existing Target Path\n",
+		},
+		{
+			name: "remove hint",
+			err: fmt.Errorf(
+				"target /tmp/file still exists and is not a symlink (remove or move it aside before adding)",
+			),
+			want: "error: target /tmp/file still exists and is not a symlink\n" +
+				"hint: remove or move it aside before adding\n",
+		},
+		{
+			name: "inspect hint",
+			err: fmt.Errorf(
+				"target /tmp/file is not an expected dotty link (inspect with `dotty status` or remove it manually)",
+			),
+			want: "error: target /tmp/file is not an expected dotty link\n" +
+				"hint: inspect with `dotty status` or remove it manually\n",
+		},
+		{
+			name: "non-hint parenthetical",
+			err:  fmt.Errorf("link failed (rollback failed: remove backup)"),
+			want: "error: link failed (rollback failed: remove backup)\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			RenderError(&out, tt.err)
+			if got := stripANSI(out.String()); got != tt.want {
+				t.Fatalf("unexpected error output\nwant: %q\ngot:  %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestRenderErrorStylesLabels(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
+
+	var out bytes.Buffer
+	RenderError(&out, fmt.Errorf("unknown package %q (run `dotty list` to see packages)", "tmux"))
+	if got := out.String(); !strings.Contains(got, "\x1b[") {
+		t.Fatalf("expected styled error output, got %q", got)
+	}
+	if got := stripANSI(out.String()); !strings.Contains(got, "hint: run `dotty list`") {
+		t.Fatalf("styled error should preserve stripped text, got %q", got)
+	}
+}
+
 func TestRepoCommandPrintsResolvedRepositoryAndConfigPath(t *testing.T) {
 	_, repo := setupCLITest(t)
 
@@ -967,6 +1120,11 @@ func setupCLIHomeOnly(t *testing.T) string {
 }
 
 func executeCommand(args ...string) (stdout string, stderr string, err error) {
+	stdout, stderr, err = executeCommandRaw(args...)
+	return stripANSI(stdout), stripANSI(stderr), err
+}
+
+func executeCommandRaw(args ...string) (stdout string, stderr string, err error) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	cmd := NewRootCommand(&out, &errOut)
@@ -974,7 +1132,7 @@ func executeCommand(args ...string) (stdout string, stderr string, err error) {
 	cmd.SetErr(&errOut)
 	cmd.SetArgs(args)
 	err = cmd.Execute()
-	return stripANSI(out.String()), stripANSI(errOut.String()), err
+	return out.String(), errOut.String(), err
 }
 
 func executeCompletion(args ...string) (choices []string, stderr string, err error) {

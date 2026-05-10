@@ -5,7 +5,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/lmilojevicc/dotty/internal/dotty"
@@ -35,6 +34,7 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 			return nil
 		},
 	}
+	configureHelp(cmd)
 	cmd.PersistentFlags().
 		StringVar(&app.repoFlag, "repo", "", "dotfiles repository path (overrides DOTTY_REPO and config)")
 	mustRegisterFlagCompletion(cmd, "repo", completeDirectories)
@@ -323,11 +323,3 @@ func sampleUsage(cmd *cobra.Command) string {
 	}
 	return cmd.CommandPath() + " " + strings.Join(useParts[1:], " ")
 }
-
-var (
-	successStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
-	packageStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
-	sourceStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
-	pathStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
-	mutedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-)
