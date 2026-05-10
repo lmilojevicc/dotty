@@ -1,8 +1,11 @@
 package dotty
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestValidateManifestNormalizesNilMaps(t *testing.T) {
@@ -37,6 +40,13 @@ func TestValidateManifestRejectsInvalidManifestShape(t *testing.T) {
 			name: "invalid package name",
 			manifest: &Manifest{Version: ManifestVersion, Packages: map[string]Package{
 				"bad.name": {Links: []LinkMapping{{Source: ".", Target: "~/.config/bad"}}},
+			}},
+			wantErr: "package name",
+		},
+		{
+			name: "empty package name",
+			manifest: &Manifest{Version: ManifestVersion, Packages: map[string]Package{
+				"": {Links: []LinkMapping{{Source: ".", Target: "~/.config/bad"}}},
 			}},
 			wantErr: "package name",
 		},
@@ -88,6 +98,16 @@ func TestValidateManifestRejectsInvalidManifestShape(t *testing.T) {
 			wantErr: "mapped more than once",
 		},
 		{
+			name: "duplicate expanded target within same package",
+			manifest: &Manifest{Version: ManifestVersion, Packages: map[string]Package{
+				"zsh": {Links: []LinkMapping{
+					{Source: ".zshrc", Target: "~/.zshrc"},
+					{Source: ".zprofile", Target: absTarget},
+				}},
+			}},
+			wantErr: "mapped more than once",
+		},
+		{
 			name: "invalid collection name",
 			manifest: &Manifest{Version: ManifestVersion, Packages: map[string]Package{
 				"zsh": {Links: []LinkMapping{{Source: ".zshrc", Target: "~/.zshrc"}}},
@@ -95,6 +115,24 @@ func TestValidateManifestRejectsInvalidManifestShape(t *testing.T) {
 				"bad.name": {Packages: []string{"zsh"}},
 			}},
 			wantErr: "collection name",
+		},
+		{
+			name: "empty collection name",
+			manifest: &Manifest{Version: ManifestVersion, Packages: map[string]Package{
+				"zsh": {Links: []LinkMapping{{Source: ".zshrc", Target: "~/.zshrc"}}},
+			}, Collections: map[string]Collection{
+				"": {Packages: []string{"zsh"}},
+			}},
+			wantErr: "collection name",
+		},
+		{
+			name: "empty collection package name",
+			manifest: &Manifest{Version: ManifestVersion, Packages: map[string]Package{
+				"zsh": {Links: []LinkMapping{{Source: ".zshrc", Target: "~/.zshrc"}}},
+			}, Collections: map[string]Collection{
+				"shell": {Packages: []string{""}},
+			}},
+			wantErr: "package name",
 		},
 		{
 			name: "collection references unknown package",
@@ -156,4 +194,80 @@ func TestFormatManifestSortsPackagesAndCollections(t *testing.T) {
 	if got != want {
 		t.Fatalf("manifest mismatch\nwant:\n%s\ngot:\n%s", want, got)
 	}
+}
+
+func TestLoadManifestRejectsEmptyFileAndInvalidTOML(t *testing.T) {
+	_, env := setupHome(t)
+	repo := t.TempDir()
+
+	writeDottyManifest(t, repo, "")
+	requireErrorContains(t, loadManifestError(repo, env), "unsupported manifest version")
+
+	writeDottyManifest(t, repo, "version = [\n")
+	requireErrorContains(t, loadManifestError(repo, env), "parse manifest")
+}
+
+func TestLoadManifestReportsReadError(t *testing.T) {
+	_, env := setupHome(t)
+	repo := t.TempDir()
+	requireNoError(t, os.Mkdir(ManifestPath(repo), 0o755))
+
+	requireErrorContains(t, loadManifestError(repo, env), "read manifest")
+}
+
+func TestSaveManifestWritesFormattedManifest(t *testing.T) {
+	_, env := setupHome(t)
+	repo := t.TempDir()
+	manifest := NewManifest()
+	manifest.Packages["zsh"] = Package{Links: []LinkMapping{{Source: ".zshrc", Target: "~/.zshrc"}}}
+
+	requireNoError(t, RunAtomic(func(tx *Tx) error {
+		return SaveManifest(tx, repo, manifest, env)
+	}))
+
+	requireFileContent(t, ManifestPath(repo), FormatManifest(manifest))
+}
+
+func TestSaveManifestRejectsInvalidManifest(t *testing.T) {
+	_, env := setupHome(t)
+	repo := t.TempDir()
+	manifest := NewManifest()
+	manifest.Version = ManifestVersion + 1
+
+	err := RunAtomic(func(tx *Tx) error {
+		return SaveManifest(tx, repo, manifest, env)
+	})
+	requireErrorContains(t, err, "unsupported manifest version")
+	requireNoPath(t, ManifestPath(repo))
+}
+
+func TestFormatManifestRoundTripAndEscapesLinkStrings(t *testing.T) {
+	manifest := NewManifest()
+	manifest.Packages["weird"] = Package{Links: []LinkMapping{
+		{Source: "quoted\"source", Target: "~/quoted\"target"},
+		{Source: "backslash\\source", Target: "~/backslash\\target"},
+	}}
+	manifest.Collections["all"] = Collection{Packages: []string{"weird"}}
+
+	var parsed Manifest
+	requireNoError(t, toml.Unmarshal([]byte(FormatManifest(manifest)), &parsed))
+	parsed.normalize()
+	if parsed.Version != manifest.Version {
+		t.Fatalf("version mismatch: want %d, got %d", manifest.Version, parsed.Version)
+	}
+	if len(parsed.Packages["weird"].Links) != 2 {
+		t.Fatalf("links did not round trip: %#v", parsed.Packages["weird"].Links)
+	}
+	requireEqualStrings(t, parsed.Collections["all"].Packages, []string{"weird"})
+}
+
+func TestFormatManifestEmptyManifest(t *testing.T) {
+	if got := FormatManifest(NewManifest()); got != "version = 1\n" {
+		t.Fatalf("empty manifest mismatch: %q", got)
+	}
+}
+
+func loadManifestError(repo string, env Env) error {
+	_, err := LoadManifest(repo, env)
+	return err
 }

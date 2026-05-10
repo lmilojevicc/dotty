@@ -2,6 +2,7 @@ package dotty
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -65,11 +66,11 @@ func PackageSourcePath(repo, packageName, source string) (string, error) {
 		return "", err
 	}
 	root := PackageRoot(repo, packageName)
-	if source == "." {
-		return root, nil
+	joined := root
+	if source != "." {
+		joined = filepath.Clean(filepath.Join(root, filepath.FromSlash(source)))
 	}
-	joined := filepath.Clean(filepath.Join(root, filepath.FromSlash(source)))
-	if !isWithin(root, joined) {
+	if !isWithin(root, joined) || !resolvedSourceStaysWithinPackage(repo, root, joined) {
 		return "", fmt.Errorf("source %q escapes package %q", source, packageName)
 	}
 	return joined, nil
@@ -126,4 +127,46 @@ func isWithin(root, path string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func resolvedSourceStaysWithinPackage(repo, root, source string) bool {
+	if _, err := os.Lstat(root); err != nil {
+		return os.IsNotExist(err)
+	}
+	repoResolved, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		return os.IsNotExist(err)
+	}
+	rootResolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return os.IsNotExist(err)
+	}
+	if !isWithin(repoResolved, rootResolved) {
+		return false
+	}
+	existingSource, ok := nearestExistingPath(source)
+	if !ok {
+		return false
+	}
+	sourceResolved, err := filepath.EvalSymlinks(existingSource)
+	if err != nil {
+		return false
+	}
+	return isWithin(rootResolved, sourceResolved)
+}
+
+func nearestExistingPath(path string) (string, bool) {
+	current := filepath.Clean(path)
+	for {
+		if _, err := os.Lstat(current); err == nil {
+			return current, true
+		} else if !os.IsNotExist(err) {
+			return "", false
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", false
+		}
+		current = parent
+	}
 }
