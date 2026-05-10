@@ -47,52 +47,54 @@ func (s Service) AddWithOptions(options AddOptions) (*AddResult, error) {
 	}
 
 	var result AddResult
-	if err := RunAtomic(func(tx *Tx) error {
-		manifest, err := LoadManifest(s.Repo, s.Env)
-		if err != nil {
-			return err
-		}
-		plan, err := s.planAdd(options.Target, options.Package, manifest, false)
-		if err != nil {
-			return err
-		}
-
-		if !plan.destExists {
-			if plan.symlinkAdoption {
-				if err := CopyPathTx(tx, plan.adoptPath, plan.dest); err != nil {
-					return err
-				}
-			} else {
-				if err := MovePathTx(tx, plan.targetAbs, plan.dest); err != nil {
-					return err
-				}
-			}
-		}
-
-		if exists, err := pathExists(plan.targetAbs); err != nil {
-			return err
-		} else if exists {
-			info, err := os.Lstat(plan.targetAbs)
+	if err := withRepositoryLock(s.Repo, func() error {
+		return RunAtomic(func(tx *Tx) error {
+			manifest, err := LoadManifest(s.Repo, s.Env)
 			if err != nil {
 				return err
 			}
-			if info.Mode()&os.ModeSymlink == 0 {
-				return fmt.Errorf("target %s still exists and is not a symlink", plan.targetAbs)
-			}
-			if err := RemoveSymlinkTx(tx, plan.targetAbs); err != nil {
+			plan, err := s.planAdd(options.Target, options.Package, manifest, false)
+			if err != nil {
 				return err
 			}
-		}
 
-		if err := CreateSymlinkTx(tx, plan.dest, plan.targetAbs); err != nil {
-			return err
-		}
-		if err := SaveManifest(tx, s.Repo, manifest, s.Env); err != nil {
-			return err
-		}
+			if !plan.destExists {
+				if plan.symlinkAdoption {
+					if err := CopyPathTx(tx, plan.adoptPath, plan.dest); err != nil {
+						return err
+					}
+				} else {
+					if err := MovePathTx(tx, plan.targetAbs, plan.dest); err != nil {
+						return err
+					}
+				}
+			}
 
-		result = plan.result
-		return nil
+			if exists, err := pathExists(plan.targetAbs); err != nil {
+				return err
+			} else if exists {
+				info, err := os.Lstat(plan.targetAbs)
+				if err != nil {
+					return err
+				}
+				if info.Mode()&os.ModeSymlink == 0 {
+					return fmt.Errorf("target %s still exists and is not a symlink", plan.targetAbs)
+				}
+				if err := RemoveSymlinkTx(tx, plan.targetAbs); err != nil {
+					return err
+				}
+			}
+
+			if err := CreateSymlinkTx(tx, plan.dest, plan.targetAbs); err != nil {
+				return err
+			}
+			if err := SaveManifest(tx, s.Repo, manifest, s.Env); err != nil {
+				return err
+			}
+
+			result = plan.result
+			return nil
+		})
 	}); err != nil {
 		return nil, err
 	}

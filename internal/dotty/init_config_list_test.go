@@ -50,6 +50,16 @@ func TestInitRejectsInvalidExistingManifest(t *testing.T) {
 	requireNoPath(t, configPath)
 }
 
+func TestInitRollsBackCreatedRepositoryWhenConfigSaveFails(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeTextFile(t, filepath.Join(home, ".config", "dotty"), "not a directory\n")
+
+	_, err := InitRepo(repo, env)
+	requireErrorContains(t, err, "not a directory")
+	requireNoPath(t, repo)
+}
+
 func TestLoadConfigReturnsEmptyConfigWhenMissing(t *testing.T) {
 	_, env := setupHome(t)
 

@@ -39,20 +39,29 @@ const (
 )
 
 func (s Service) Link(options LinkOptions) ([]LinkResult, error) {
-	plan, err := s.planLink(options)
-	if err != nil {
-		return nil, err
-	}
+	var plan *linkPlan
 	if options.DryRun {
+		var err error
+		plan, err = s.planLink(options)
+		if err != nil {
+			return nil, err
+		}
 		return s.linkResults(plan, true), nil
 	}
-	if err := RunAtomic(func(tx *Tx) error {
-		for i := range plan.actions {
-			if err := s.executeLinkAction(tx, &plan.actions[i]); err != nil {
-				return err
-			}
+	if err := withRepositoryLock(s.Repo, func() error {
+		var err error
+		plan, err = s.planLink(options)
+		if err != nil {
+			return err
 		}
-		return nil
+		return RunAtomic(func(tx *Tx) error {
+			for i := range plan.actions {
+				if err := s.executeLinkAction(tx, &plan.actions[i]); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	}); err != nil {
 		return nil, err
 	}

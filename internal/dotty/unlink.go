@@ -37,20 +37,29 @@ const (
 )
 
 func (s Service) Unlink(options UnlinkOptions) ([]UnlinkResult, error) {
-	plan, err := s.planUnlink(options)
-	if err != nil {
-		return nil, err
-	}
+	var plan *unlinkPlan
 	if options.DryRun {
+		var err error
+		plan, err = s.planUnlink(options)
+		if err != nil {
+			return nil, err
+		}
 		return s.unlinkResults(plan, true), nil
 	}
-	if err := RunAtomic(func(tx *Tx) error {
-		for i := range plan.actions {
-			if err := s.executeUnlinkAction(tx, &plan.actions[i]); err != nil {
-				return err
-			}
+	if err := withRepositoryLock(s.Repo, func() error {
+		var err error
+		plan, err = s.planUnlink(options)
+		if err != nil {
+			return err
 		}
-		return nil
+		return RunAtomic(func(tx *Tx) error {
+			for i := range plan.actions {
+				if err := s.executeUnlinkAction(tx, &plan.actions[i]); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	}); err != nil {
 		return nil, err
 	}

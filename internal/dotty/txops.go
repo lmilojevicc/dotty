@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 )
+
+var renamePath = os.Rename
 
 func EnsureDirTx(tx *Tx, dir string, perm os.FileMode) error {
 	dir = filepath.Clean(dir)
@@ -82,11 +85,11 @@ func MovePathTx(tx *Tx, src, dst string) error {
 	if err := EnsureDirTx(tx, dirOf(dst), 0o755); err != nil {
 		return err
 	}
-	if err := os.Rename(src, dst); err != nil {
+	if err := movePathWithFallback(src, dst); err != nil {
 		return fmt.Errorf("move %s to %s: %w", src, dst, err)
 	}
 	tx.AddRollback(func() error {
-		return os.Rename(dst, src)
+		return restoreMovedPathWithFallback(dst, src)
 	})
 	return nil
 }
@@ -154,14 +157,50 @@ func MoveAsideTx(tx *Tx, path string) error {
 	if err := os.Remove(backup); err != nil {
 		return fmt.Errorf("prepare backup path for %s: %w", path, err)
 	}
-	if err := os.Rename(path, backup); err != nil {
+	if err := movePathWithFallback(path, backup); err != nil {
 		return fmt.Errorf("move %s aside: %w", path, err)
 	}
 	tx.AddRollback(func() error {
-		return os.Rename(backup, path)
+		return restoreMovedPathWithFallback(backup, path)
 	})
 	tx.AddCleanup(func() error {
 		return os.RemoveAll(backup)
 	})
+	return nil
+}
+
+func movePathWithFallback(src, dst string) error {
+	return renameOrCopyRemove(src, dst, true)
+}
+
+func restoreMovedPathWithFallback(src, dst string) error {
+	return renameOrCopyRemove(src, dst, false)
+}
+
+func renameOrCopyRemove(src, dst string, cleanupDstOnRemoveSourceError bool) error {
+	if err := renamePath(src, dst); err != nil {
+		if !errors.Is(err, syscall.EXDEV) {
+			return err
+		}
+	} else {
+		return nil
+	}
+
+	dstExisted, err := pathExists(dst)
+	if err != nil {
+		return err
+	}
+	if err := copyPath(src, dst); err != nil {
+		if !dstExisted {
+			_ = os.RemoveAll(dst)
+		}
+		return err
+	}
+	if err := os.RemoveAll(src); err != nil {
+		if cleanupDstOnRemoveSourceError {
+			_ = os.RemoveAll(dst)
+		}
+		return fmt.Errorf("remove source %s after cross-device move: %w", src, err)
+	}
 	return nil
 }

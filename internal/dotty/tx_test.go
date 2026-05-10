@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -66,6 +67,73 @@ func TestMoveAsideTxRestoresOnRollbackAndCleansBackupOnCommit(t *testing.T) {
 	requireNoDottyBackups(t, dir)
 }
 
+func TestMovePathTxFallsBackOnCrossDeviceRenameAndCommits(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+	writeTextFile(t, filepath.Join(src, "nested", "config"), "enabled = true\n")
+	requireNoError(t, os.Symlink("nested/config", filepath.Join(src, "config.link")))
+	forceRenameError(t, syscall.EXDEV)
+
+	requireNoError(t, RunAtomic(func(tx *Tx) error {
+		return MovePathTx(tx, src, dst)
+	}))
+
+	requireNoPath(t, src)
+	requireFileContent(t, filepath.Join(dst, "nested", "config"), "enabled = true\n")
+	assertSymlink(t, filepath.Join(dst, "config.link"), "nested/config")
+}
+
+func TestMovePathTxFallsBackOnCrossDeviceRenameAndRollsBack(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+	writeTextFile(t, filepath.Join(src, "nested", "config"), "enabled = true\n")
+	requireNoError(t, os.Symlink("nested/config", filepath.Join(src, "config.link")))
+	forceRenameError(t, syscall.EXDEV)
+
+	err := RunAtomic(func(tx *Tx) error {
+		requireNoError(t, MovePathTx(tx, src, dst))
+		return errors.New("stop")
+	})
+	requireErrorContains(t, err, "stop")
+
+	requireFileContent(t, filepath.Join(src, "nested", "config"), "enabled = true\n")
+	assertSymlink(t, filepath.Join(src, "config.link"), "nested/config")
+	requireNoPath(t, dst)
+}
+
+func TestMovePathTxDoesNotFallbackOnOtherRenameErrors(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+	writeTextFile(t, filepath.Join(src, "config"), "enabled = true\n")
+	forceRenameError(t, syscall.EPERM)
+
+	err := RunAtomic(func(tx *Tx) error {
+		return MovePathTx(tx, src, dst)
+	})
+	requireErrorContains(t, err, "operation not permitted")
+	requireFileContent(t, filepath.Join(src, "config"), "enabled = true\n")
+	requireNoPath(t, dst)
+}
+
+func TestMoveAsideTxFallsBackOnCrossDeviceRenameAndRollsBack(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	writeTextFile(t, target, "conflict\n")
+	forceRenameError(t, syscall.EXDEV)
+
+	err := RunAtomic(func(tx *Tx) error {
+		requireNoError(t, MoveAsideTx(tx, target))
+		requireNoPath(t, target)
+		return errors.New("stop")
+	})
+	requireErrorContains(t, err, "stop")
+	requireFileContent(t, target, "conflict\n")
+	requireNoDottyBackups(t, dir)
+}
+
 func TestCopyPathTxCopiesDirectorySymlinksAndRollsBack(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src")
@@ -110,4 +178,15 @@ func requireNoDottyBackups(t *testing.T, dir string) {
 			t.Fatalf("backup %s was not cleaned up", entry.Name())
 		}
 	}
+}
+
+func forceRenameError(t *testing.T, errno syscall.Errno) {
+	t.Helper()
+	original := renamePath
+	renamePath = func(oldpath, newpath string) error {
+		return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: errno}
+	}
+	t.Cleanup(func() {
+		renamePath = original
+	})
 }
