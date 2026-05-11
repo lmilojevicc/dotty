@@ -1,2 +1,5 @@
 /dotty
 /dist/
+/opencode.json
+/.opencode/
+/.sisyphus/run-continuation/
