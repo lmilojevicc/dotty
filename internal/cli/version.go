@@ -12,14 +12,11 @@ func SetVersion(v string) {
 		Version = v
 		return
 	}
-	Version = resolveVersion(v, *info, ok)
+	Version = resolveVersion(v, *info)
 }
 
-func resolveVersion(v string, info debug.BuildInfo, ok bool) string {
+func resolveVersion(v string, info debug.BuildInfo) string {
 	if v != "dev" {
-		return v
-	}
-	if !ok {
 		return v
 	}
 	if info.Main.Version == "" || info.Main.Version == "(devel)" {

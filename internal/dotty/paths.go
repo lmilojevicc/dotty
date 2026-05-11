@@ -26,14 +26,7 @@ func ExpandPath(path string, env Env) (string, error) {
 }
 
 func ExpandTargetPath(path string, env Env) (string, error) {
-	abs, err := ExpandPath(path, env)
-	if err != nil {
-		return "", err
-	}
-	if !filepath.IsAbs(abs) {
-		return "", fmt.Errorf("target path %q must be absolute or home-relative", path)
-	}
-	return abs, nil
+	return ExpandPath(path, env)
 }
 
 func HomeRelative(abs string, env Env) string {
