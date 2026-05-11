@@ -113,6 +113,9 @@ func (s Service) classifyLinkAction(
 		return action, err
 	}
 	action.sourceAbs = sourceAbs
+	if err := validateLinkMappingTopology(s.Repo, packageName, mapping, s.Env); err != nil {
+		return action, err
+	}
 
 	if exists, err := pathExists(sourceAbs); err != nil {
 		return action, err

@@ -194,6 +194,9 @@ func (s Service) planAdd(
 	if err := AddManifestLink(manifest, packageName, link, s.Env); err != nil {
 		return nil, err
 	}
+	if err := validateLinkMappingTopology(s.Repo, packageName, link, s.Env); err != nil {
+		return nil, err
+	}
 
 	return &addPlan{
 		result: AddResult{

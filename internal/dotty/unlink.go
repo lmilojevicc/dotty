@@ -124,6 +124,9 @@ func (s Service) classifyUnlinkAction(
 		return action, err
 	}
 	action.sourceAbs = sourceAbs
+	if err := validateLinkMappingTopology(s.Repo, packageName, mapping, s.Env); err != nil {
+		return action, err
+	}
 
 	targetAbs, err := ExpandTargetPath(mapping.Target, s.Env)
 	if err != nil {
