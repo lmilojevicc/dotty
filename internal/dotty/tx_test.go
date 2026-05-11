@@ -103,6 +103,28 @@ func TestMovePathTxFallsBackOnCrossDeviceRenameAndRollsBack(t *testing.T) {
 	requireNoPath(t, dst)
 }
 
+func TestMovePathTxCrossDeviceFallbackKeepsCopiedDestinationWhenRemoveFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can remove paths regardless of permission bits")
+	}
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "parent")
+	src := filepath.Join(parent, "src")
+	dst := filepath.Join(dir, "dst")
+	writeTextFile(t, filepath.Join(src, "config"), "enabled = true\n")
+	requireNoError(t, os.Chmod(parent, 0o555))
+	t.Cleanup(func() {
+		_ = os.Chmod(parent, 0o755)
+	})
+	forceRenameError(t, syscall.EXDEV)
+
+	err := RunAtomic(func(tx *Tx) error {
+		return MovePathTx(tx, src, dst)
+	})
+	requireErrorContains(t, err, "remove source")
+	requireFileContent(t, filepath.Join(dst, "config"), "enabled = true\n")
+}
+
 func TestMovePathTxDoesNotFallbackOnOtherRenameErrors(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src")
@@ -132,6 +154,26 @@ func TestMoveAsideTxFallsBackOnCrossDeviceRenameAndRollsBack(t *testing.T) {
 	requireErrorContains(t, err, "stop")
 	requireFileContent(t, target, "conflict\n")
 	requireNoDottyBackups(t, dir)
+}
+
+func TestMoveAsideTxKeepsBackupWhenRollbackRestoreFails(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	writeTextFile(t, target, "conflict\n")
+	originalRename := renamePath
+
+	err := RunAtomic(func(tx *Tx) error {
+		requireNoError(t, MoveAsideTx(tx, target))
+		renamePath = func(oldpath, newpath string) error {
+			return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: syscall.EPERM}
+		}
+		return errors.New("stop")
+	})
+	renamePath = originalRename
+
+	requireErrorContains(t, err, "rollback failed")
+	requireNoPath(t, target)
+	requireDottyBackup(t, dir)
 }
 
 func TestCopyPathTxCopiesDirectorySymlinksAndRollsBack(t *testing.T) {
@@ -178,6 +220,18 @@ func requireNoDottyBackups(t *testing.T, dir string) {
 			t.Fatalf("backup %s was not cleaned up", entry.Name())
 		}
 	}
+}
+
+func requireDottyBackup(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	requireNoError(t, err)
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".dotty-backup-") {
+			return
+		}
+	}
+	t.Fatalf("expected a .dotty-backup-* path in %s", dir)
 }
 
 func forceRenameError(t *testing.T, errno syscall.Errno) {

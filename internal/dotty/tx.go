@@ -38,11 +38,6 @@ func (tx *Tx) Rollback() error {
 		}
 	}
 	tx.rollbacks = nil
-	for _, cleanup := range tx.cleanups {
-		if err := cleanup(); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, err)
-		}
-	}
 	tx.cleanups = nil
 	return errors.Join(errs...)
 }

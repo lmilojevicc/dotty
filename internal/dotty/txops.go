@@ -170,14 +170,14 @@ func MoveAsideTx(tx *Tx, path string) error {
 }
 
 func movePathWithFallback(src, dst string) error {
-	return renameOrCopyRemove(src, dst, true)
+	return renameOrCopyRemove(src, dst)
 }
 
 func restoreMovedPathWithFallback(src, dst string) error {
-	return renameOrCopyRemove(src, dst, false)
+	return renameOrCopyRemove(src, dst)
 }
 
-func renameOrCopyRemove(src, dst string, cleanupDstOnRemoveSourceError bool) error {
+func renameOrCopyRemove(src, dst string) error {
 	if err := renamePath(src, dst); err != nil {
 		if !errors.Is(err, syscall.EXDEV) {
 			return err
@@ -197,9 +197,6 @@ func renameOrCopyRemove(src, dst string, cleanupDstOnRemoveSourceError bool) err
 		return err
 	}
 	if err := os.RemoveAll(src); err != nil {
-		if cleanupDstOnRemoveSourceError {
-			_ = os.RemoveAll(dst)
-		}
 		return fmt.Errorf("remove source %s after cross-device move: %w", src, err)
 	}
 	return nil
