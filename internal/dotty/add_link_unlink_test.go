@@ -284,6 +284,25 @@ links = [
 	requireNoPath(t, filepath.Join(home, ".zshrc"))
 }
 
+func TestLinkForcePrevalidationLeavesConflictUnchangedWhenLaterSourceMissing(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+  { source = ".missing", target = "~/.missing" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
+	target := filepath.Join(home, ".zshrc")
+	writeTextFile(t, target, "local copy\n")
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"zsh"}, Force: true})
+	requireErrorContains(t, err, "source \".missing\" is missing")
+	requireFileContent(t, target, "local copy\n")
+	requireNoDottyBackups(t, home)
+}
+
 func TestLinkAllLinksEveryPackageAndBareLinkRequiresSelection(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
