@@ -159,6 +159,29 @@ func TestAddRefusesSymlinkPointingInsideSymlinkedRepository(t *testing.T) {
 	requireNoPath(t, filepath.Join(realRepo, "tmux"))
 }
 
+func TestAddRefusesSymlinkedPackageSourceEscapingRepository(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	_, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	externalSource := filepath.Join(home, "old-stow", "tmux")
+	requireNoError(t, os.MkdirAll(externalSource, 0o755))
+	writeTextFile(t, filepath.Join(externalSource, "tmux.conf"), "set -g status on\n")
+	requireNoError(t, os.Symlink(externalSource, filepath.Join(repo, "tmux")))
+	target := filepath.Join(home, ".config", "tmux")
+	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+	requireNoError(t, os.Symlink(externalSource, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = NewService(repo, env).Add(target, "tmux")
+	requireErrorContains(t, err, "escapes package")
+	assertSymlink(t, target, externalSource)
+	assertSymlink(t, filepath.Join(repo, "tmux"), externalSource)
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
 func TestLinkRefusesTargetConflictUnlessForced(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
@@ -179,6 +202,93 @@ links = [
 	_, err = svc.Link(LinkOptions{Packages: []string{"zsh"}, Force: true})
 	requireNoError(t, err)
 	assertSymlink(t, target, filepath.Join(repo, "zsh", ".zshrc"))
+}
+
+func TestLinkRejectsDangerousTargetPathsEvenWhenForced(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     func(home, repo string) string
+		assertSafe func(t *testing.T, home, repo, target string)
+	}{
+		{
+			name:   "home directory",
+			target: func(home, repo string) string { return "~" },
+			assertSafe: func(t *testing.T, home, repo, target string) {
+				t.Helper()
+				info, err := os.Lstat(home)
+				requireNoError(t, err)
+				if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+					t.Fatalf("home should remain a real directory, info=%v", info)
+				}
+				requireFileContent(t, ManifestPath(repo), dangerousTargetManifest(target))
+			},
+		},
+		{
+			name:   "dotfiles repository",
+			target: func(home, repo string) string { return repo },
+			assertSafe: func(t *testing.T, home, repo, target string) {
+				t.Helper()
+				info, err := os.Lstat(repo)
+				requireNoError(t, err)
+				if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+					t.Fatalf("repository should remain a real directory, info=%v", info)
+				}
+				requireFileContent(t, ManifestPath(repo), dangerousTargetManifest(target))
+			},
+		},
+		{
+			name:   "inside dotfiles repository",
+			target: func(home, repo string) string { return filepath.Join(repo, "target") },
+			assertSafe: func(t *testing.T, home, repo, target string) {
+				t.Helper()
+				requireNoPath(t, target)
+				requireFileContent(t, ManifestPath(repo), dangerousTargetManifest(target))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home, env := setupHome(t)
+			repo := filepath.Join(home, "dotfiles")
+			requireNoError(t, os.MkdirAll(filepath.Join(repo, "pkg"), 0o755))
+			writeTextFile(t, filepath.Join(repo, "pkg", "config"), "enabled = true\n")
+			target := tt.target(home, repo)
+			writeDottyManifest(t, repo, dangerousTargetManifest(target))
+
+			_, err := NewService(
+				repo,
+				env,
+			).Link(LinkOptions{Packages: []string{"pkg"}, Force: true})
+			requireErrorContains(t, err, "dangerous Target Path")
+			tt.assertSafe(t, home, repo, target)
+		})
+	}
+}
+
+func TestLinkValidatesOnlySelectedPackageTargets(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.danger]
+links = [
+  { source = ".", target = "~" },
+]
+
+[packages.safe]
+links = [
+  { source = ".", target = "~/.config/safe" },
+]
+`)
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "danger"), 0o755))
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "safe"), 0o755))
+	svc := NewService(repo, env)
+
+	_, err := svc.Link(LinkOptions{Packages: []string{"safe"}})
+	requireNoError(t, err)
+	assertSymlink(t, filepath.Join(home, ".config", "safe"), filepath.Join(repo, "safe"))
+
+	_, err = svc.Link(LinkOptions{Packages: []string{"danger"}, Force: true})
+	requireErrorContains(t, err, "dangerous Target Path")
 }
 
 func TestLinkDryRunValidatesForceWithoutReplacingConflict(t *testing.T) {
@@ -402,6 +512,20 @@ links = [
 	assertSymlink(t, target, source)
 }
 
+func TestUnlinkRejectsDangerousTargetInsidePackageSource(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	source := filepath.Join(repo, "pkg")
+	target := filepath.Join(source, "target")
+	requireNoError(t, os.MkdirAll(source, 0o755))
+	writeDottyManifest(t, repo, dangerousTargetManifest(target))
+	requireNoError(t, os.Symlink(source, target))
+
+	_, err := NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"pkg"}})
+	requireErrorContains(t, err, "dangerous Target Path")
+	assertSymlink(t, target, source)
+}
+
 func TestUnlinkAllUnlinksEveryPackage(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
@@ -493,6 +617,12 @@ func setupLinkedPackageTest(t *testing.T, manifest string) (home string, repo st
 	requireNoError(t, os.MkdirAll(repo, 0o755))
 	writeDottyManifest(t, repo, manifest)
 	return home, repo, env
+}
+
+func dangerousTargetManifest(target string) string {
+	return "version = 1\n\n[packages.pkg]\nlinks = [\n  { source = \".\", target = \"" + filepath.ToSlash(
+		target,
+	) + "\" },\n]\n"
 }
 
 func requireResultPackages(t *testing.T, results []LinkResult, want []string) {
