@@ -62,15 +62,3 @@ release:
   draft: false
   prerelease: auto
   name_template: "{{.Tag}}"
-  # brews:
-  #   - repository:
-  #       owner: lmilojevicc
-  #       name: homebrew-tap
-  #     directory: Formula
-  #     homepage: "https://github.com/lmilojevicc/dotty"
-  #     description: "Go CLI for deterministic dotfile management"
-  #     license: "MIT"
-  #     install: |
-  #       bin.install "dotty"
-  #     test: |
-  #       system "#{bin}/dotty", "--version"
