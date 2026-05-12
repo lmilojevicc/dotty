@@ -744,6 +744,29 @@ links = [
 		}
 	})
 
+	t.Run("repeated-state", func(t *testing.T) {
+		out, errOut, err := executeCommand(
+			"--repo",
+			repo,
+			"status",
+			"--state",
+			"linked",
+			"--state",
+			"linked",
+		)
+		if err != nil {
+			t.Fatalf("status with repeated linked state failed: %v\nstderr: %s", err, errOut)
+		}
+		want := fmt.Sprintf(
+			"Repository: ~/dotfiles\n\n%-24s %s\n\nSummary: 1 package: 1 linked\n",
+			"zsh",
+			"LINKED",
+		)
+		if out != want {
+			t.Fatalf("unexpected repeated-state output\nwant:\n%s\ngot:\n%s", want, out)
+		}
+	})
+
 	t.Run("untracked-only", func(t *testing.T) {
 		out, errOut, err := executeCommand("--repo", repo, "status", "--state", "untracked")
 		if err != nil {
@@ -757,6 +780,46 @@ links = [
 		)
 		if out != want {
 			t.Fatalf("unexpected untracked-only output\nwant:\n%s\ngot:\n%s", want, out)
+		}
+	})
+
+	t.Run("positional-package-keeps-repository-untracked-content", func(t *testing.T) {
+		out, errOut, err := executeCommand("--repo", repo, "status", "zsh", "--state", "untracked")
+		if err != nil {
+			t.Fatalf("status zsh --state untracked failed: %v\nstderr: %s", err, errOut)
+		}
+		want := fmt.Sprintf(
+			"Repository: ~/dotfiles\n\n%s\n  %s\n  %s\n\nSummary: 0 packages; 2 untracked\n",
+			"UNTRACKED",
+			"ghostty",
+			"zsh/.zprofile",
+		)
+		if out != want {
+			t.Fatalf("unexpected positional untracked output\nwant:\n%s\ngot:\n%s", want, out)
+		}
+	})
+
+	t.Run("repeated-positional-package", func(t *testing.T) {
+		out, errOut, err := executeCommand("--repo", repo, "status", "zsh", "zsh")
+		if err != nil {
+			t.Fatalf("status with repeated zsh package failed: %v\nstderr: %s", err, errOut)
+		}
+		want := fmt.Sprintf(
+			"Repository: ~/dotfiles\n\n%-24s %s\n%-24s %s\n\n%s\n  %s\n  %s\n\nSummary: 2 packages: 2 linked; 2 untracked\n",
+			"zsh",
+			"LINKED",
+			"zsh",
+			"LINKED",
+			"UNTRACKED",
+			"ghostty",
+			"zsh/.zprofile",
+		)
+		if out != want {
+			t.Fatalf(
+				"unexpected repeated positional package output\nwant:\n%s\ngot:\n%s",
+				want,
+				out,
+			)
 		}
 	})
 
@@ -1345,11 +1408,15 @@ links = [
 ]
 `)
 
-	choices, errOut, err := executeCompletion("--repo", repo, "link", "tmux", "")
-	if err != nil {
-		t.Fatalf("link completion failed: %v\nstderr: %s", err, errOut)
+	for _, command := range []string{"link", "unlink", "status"} {
+		t.Run(command, func(t *testing.T) {
+			choices, errOut, err := executeCompletion("--repo", repo, command, "tmux", "")
+			if err != nil {
+				t.Fatalf("%s completion failed: %v\nstderr: %s", command, err, errOut)
+			}
+			requireChoices(t, choices, []string{"zsh"})
+		})
 	}
-	requireChoices(t, choices, []string{"zsh"})
 }
 
 func TestCollectionFlagCompletesManifestCollections(t *testing.T) {
@@ -1593,6 +1660,90 @@ packages = ["tmux", "zsh"]
 	requireOutputContains(t, out, "Collections\n")
 	requireOutputContains(t, out, "terminal")
 	requireOutputContains(t, out, "tmux, zsh")
+}
+
+func TestListPrintsEmptyInventory(t *testing.T) {
+	_, repo := setupCLITest(t)
+	writeManifest(t, repo, "version = 1\n")
+
+	out, errOut, err := executeCommand("--repo", repo, "list")
+	if err != nil {
+		t.Fatalf("list empty inventory failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "Packages\n  none\n\nCollections\n  none\n"
+	if out != want {
+		t.Fatalf("unexpected empty list output\nwant:\n%s\ngot:\n%s", want, out)
+	}
+}
+
+func TestListStatusAndCompletionUseManifestInventoryCoherently(t *testing.T) {
+	_, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".", target = "~/.config/zsh" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[collections.terminal]
+packages = ["tmux", "zsh"]
+`)
+	if err := os.MkdirAll(filepath.Join(repo, "tmux"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	listOut, errOut, err := executeCommand("--repo", repo, "list")
+	if err != nil {
+		t.Fatalf("list failed: %v\nstderr: %s", err, errOut)
+	}
+	wantList := fmt.Sprintf(
+		"Packages\n  %-24s %s\n  %-24s %s\n\nCollections\n  %-24s %s\n",
+		"tmux",
+		"1 link",
+		"zsh",
+		"1 link",
+		"terminal",
+		"tmux, zsh",
+	)
+	if listOut != wantList {
+		t.Fatalf("unexpected coherent list output\nwant:\n%s\ngot:\n%s", wantList, listOut)
+	}
+
+	statusOut, errOut, err := executeCommand("--repo", repo, "status")
+	if err != nil {
+		t.Fatalf("status failed: %v\nstderr: %s", err, errOut)
+	}
+	wantStatus := fmt.Sprintf(
+		"Repository: ~/dotfiles\n\n%-24s %s\n%-24s %s\n\nSummary: 2 packages: 2 unlinked\n",
+		"tmux",
+		"UNLINKED",
+		"zsh",
+		"UNLINKED",
+	)
+	if statusOut != wantStatus {
+		t.Fatalf("unexpected coherent status output\nwant:\n%s\ngot:\n%s", wantStatus, statusOut)
+	}
+
+	choices, errOut, err := executeCompletion("--repo", repo, "status", "")
+	if err != nil {
+		t.Fatalf("status completion failed: %v\nstderr: %s", err, errOut)
+	}
+	requireChoices(t, choices, []string{"tmux", "zsh"})
+
+	choices, errOut, err = executeCompletion("--repo", repo, "link", "--collection", "")
+	if err != nil {
+		t.Fatalf("collection completion failed: %v\nstderr: %s", err, errOut)
+	}
+	requireChoices(t, choices, []string{"terminal"})
 }
 
 func TestStatusPrintsPackageSummariesAndVerboseEntries(t *testing.T) {

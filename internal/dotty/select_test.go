@@ -8,15 +8,26 @@ func TestResolvePackageSelectionExpandsCollectionsAndDedupesInOrder(t *testing.T
 	manifest.Packages["tmux"] = Package{}
 	manifest.Packages["ghostty"] = Package{}
 	manifest.Collections["terminal"] = Collection{Packages: []string{"tmux", "ghostty"}}
+	manifest.Collections["shell"] = Collection{Packages: []string{"zsh", "ghostty"}}
 
 	selected, err := ResolvePackageSelection(
 		manifest,
 		[]string{"zsh", "tmux"},
-		[]string{"terminal"},
+		[]string{"terminal", "shell", "terminal"},
 		false,
 	)
 	requireNoError(t, err)
 	requireEqualStrings(t, selected, []string{"zsh", "tmux", "ghostty"})
+}
+
+func TestResolvePackageSelectionAllowsEmptyCollectionsAsNoOp(t *testing.T) {
+	manifest := NewManifest()
+	manifest.Packages["zsh"] = Package{}
+	manifest.Collections["empty"] = Collection{Packages: nil}
+
+	selected, err := ResolvePackageSelection(manifest, nil, []string{"empty"}, false)
+	requireNoError(t, err)
+	requireEqualStrings(t, selected, nil)
 }
 
 func TestResolvePackageSelectionSelectsAllPackagesInSortedOrder(t *testing.T) {

@@ -113,3 +113,19 @@ packages = ["zsh"]
 	}
 	requireEqualStrings(t, inv.Collections[1].Packages, []string{"tmux", "zsh"})
 }
+
+func TestListReportsEmptyManifestInventory(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(repo, 0o755))
+	writeDottyManifest(t, repo, "version = 1\n")
+
+	inv, err := NewService(repo, env).List()
+	requireNoError(t, err)
+	if len(inv.Packages) != 0 {
+		t.Fatalf("expected no packages, got %#v", inv.Packages)
+	}
+	if len(inv.Collections) != 0 {
+		t.Fatalf("expected no collections, got %#v", inv.Collections)
+	}
+}

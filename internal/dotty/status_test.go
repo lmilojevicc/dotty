@@ -210,6 +210,115 @@ links = [
 	}
 }
 
+func TestStatusSummarizesMixedStatesByPriority(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(repo, 0o755))
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.conflict_priority]
+links = [
+  { source = "linked", target = "~/.config/conflict-priority-linked" },
+  { source = "conflict", target = "~/.config/conflict-priority-conflict" },
+  { source = "unlinked", target = "~/.config/conflict-priority-unlinked" },
+]
+
+[packages.missing_priority]
+links = [
+  { source = "missing", target = "~/.config/missing-priority-missing" },
+  { source = "conflict", target = "~/.config/missing-priority-conflict" },
+  { source = "linked", target = "~/.config/missing-priority-linked" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "conflict_priority", "linked"), "linked\n")
+	writeTextFile(t, filepath.Join(repo, "conflict_priority", "conflict"), "conflict\n")
+	writeTextFile(t, filepath.Join(repo, "conflict_priority", "unlinked"), "unlinked\n")
+	writeTextFile(t, filepath.Join(repo, "missing_priority", "conflict"), "conflict\n")
+	writeTextFile(t, filepath.Join(repo, "missing_priority", "linked"), "linked\n")
+	requireNoError(t, os.MkdirAll(filepath.Join(home, ".config"), 0o755))
+	requireNoError(
+		t,
+		os.Symlink(
+			filepath.Join(repo, "conflict_priority", "linked"),
+			filepath.Join(home, ".config", "conflict-priority-linked"),
+		),
+	)
+	writeTextFile(
+		t,
+		filepath.Join(home, ".config", "conflict-priority-conflict"),
+		"target copy\n",
+	)
+	writeTextFile(
+		t,
+		filepath.Join(home, ".config", "missing-priority-conflict"),
+		"target copy\n",
+	)
+	requireNoError(
+		t,
+		os.Symlink(
+			filepath.Join(repo, "missing_priority", "linked"),
+			filepath.Join(home, ".config", "missing-priority-linked"),
+		),
+	)
+
+	report, err := NewService(repo, env).Status(nil)
+	requireNoError(t, err)
+
+	gotStates := map[string]State{}
+	for _, pkg := range report.Packages {
+		gotStates[pkg.Name] = pkg.State
+	}
+	if gotStates["conflict_priority"] != StateConflict {
+		t.Fatalf(
+			"conflict should outrank linked/unlinked mixed states, got %s",
+			gotStates["conflict_priority"],
+		)
+	}
+	if gotStates["missing_priority"] != StateMissingSource {
+		t.Fatalf(
+			"missing source should outrank conflict and linked states, got %s",
+			gotStates["missing_priority"],
+		)
+	}
+}
+
+func TestStatusPackageFilterRepeatsAndKeepsRepositoryUntrackedContent(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(repo, 0o755))
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux"), 0o755))
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "source ~/.zprofile\n")
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zprofile"), "export PATH\n")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "ghostty"), 0o755))
+
+	report, err := NewService(repo, env).Status([]string{"zsh", "zsh"})
+	requireNoError(t, err)
+
+	gotPackages := make([]string, 0, len(report.Packages))
+	for _, pkg := range report.Packages {
+		gotPackages = append(gotPackages, pkg.Name)
+	}
+	requireEqualStrings(t, gotPackages, []string{"zsh", "zsh"})
+
+	gotUntracked := make([]string, 0, len(report.Untracked))
+	for _, item := range report.Untracked {
+		gotUntracked = append(gotUntracked, item.Path)
+	}
+	requireEqualStrings(t, gotUntracked, []string{"ghostty", "zsh/.zprofile"})
+}
+
 func TestStatusReportsUntrackedRepositoryContent(t *testing.T) {
 	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
@@ -244,6 +353,67 @@ links = [
 		got = append(got, item.Path)
 	}
 	requireEqualStrings(t, got, []string{"ghostty", "zsh/.zprofile", "zsh/secrets"})
+}
+
+func TestStatusReportsSourceAwareUntrackedRepositoryContent(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(repo, 0o755))
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.nvim]
+links = [
+  { source = "config/nvim", target = "~/.config/nvim" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
+	writeTextFile(
+		t,
+		filepath.Join(repo, "nvim", "config", "nvim", "init.lua"),
+		"vim.opt.nu = true\n",
+	)
+	writeTextFile(
+		t,
+		filepath.Join(repo, "nvim", "config", "nvim", "after", "plugin.lua"),
+		"tracked\n",
+	)
+	writeTextFile(t, filepath.Join(repo, "nvim", "config", "git", "config"), "[user]\n")
+	writeTextFile(t, filepath.Join(repo, "nvim", ".secret"), "hidden package content\n")
+	writeTextFile(t, filepath.Join(repo, "tmux", "tmux.conf"), "set -g mouse on\n")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, ".git"), 0o755))
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, ".config"), 0o755))
+	requireNoError(t, os.MkdirAll(filepath.Join(home, "external"), 0o755))
+	requireNoError(
+		t,
+		os.Symlink(filepath.Join(home, "external"), filepath.Join(repo, "nvim", "cache-link")),
+	)
+	requireNoError(
+		t,
+		os.Symlink(filepath.Join(home, "external"), filepath.Join(repo, "wezterm")),
+	)
+
+	report, err := NewService(repo, env).Status(nil)
+	requireNoError(t, err)
+
+	got := make([]string, 0, len(report.Untracked))
+	for _, item := range report.Untracked {
+		got = append(got, item.Path)
+	}
+	requireEqualStrings(
+		t,
+		got,
+		[]string{
+			".config",
+			"nvim/.secret",
+			"nvim/cache-link",
+			"nvim/config/git",
+			"wezterm",
+		},
+	)
 }
 
 func TestStatusFilterRejectsUnknownPackage(t *testing.T) {

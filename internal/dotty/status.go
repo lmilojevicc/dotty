@@ -305,6 +305,9 @@ func untrackedUnderPackage(
 			}
 			return nil
 		}
+		if d.IsDir() && isParentOfTrackedSource(rel, tracked) {
+			return nil
+		}
 		items = append(
 			items,
 			UntrackedItem{
@@ -326,6 +329,16 @@ func isTrackedOrInsideTracked(rel string, tracked map[string]bool) bool {
 	rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
 	for source := range tracked {
 		if source == rel || strings.HasPrefix(rel, source+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func isParentOfTrackedSource(rel string, tracked map[string]bool) bool {
+	rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
+	for source := range tracked {
+		if strings.HasPrefix(source, rel+"/") {
 			return true
 		}
 	}
