@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -62,6 +63,7 @@ func TestAddDryRunPrintsWouldAddAndDoesNotChangeFilesystem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	homeBefore := snapshotTree(t, home)
 
 	out, errOut, err := executeCommand("--repo", repo, "add", "--dry-run", target, "tmux")
 	if err != nil {
@@ -89,6 +91,7 @@ func TestAddDryRunPrintsWouldAddAndDoesNotChangeFilesystem(t *testing.T) {
 			string(manifestAfter),
 		)
 	}
+	requireSnapshotUnchanged(t, home, homeBefore)
 }
 
 func TestLinkPrintsEachCreatedLink(t *testing.T) {
@@ -160,6 +163,7 @@ links = [
 	if err := os.WriteFile(target, []byte("local copy\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	homeBefore := snapshotTree(t, home)
 
 	out, errOut, err := executeCommand("--repo", repo, "link", "--force", "--dry-run", "zsh")
 	if err != nil {
@@ -173,6 +177,41 @@ links = [
 	if data, err := os.ReadFile(target); err != nil || string(data) != "local copy\n" {
 		t.Fatalf("target conflict changed: data=%q err=%v", string(data), err)
 	}
+	requireSnapshotUnchanged(t, home, homeBefore)
+}
+
+func TestLinkDryRunPlainPrintsWouldLinkAndDoesNotMutateFilesystem(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	if err := os.WriteFile(source, []byte("export EDITOR=vim\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".zshrc")
+	homeBefore := snapshotTree(t, home)
+
+	out, errOut, err := executeCommand("--repo", repo, "link", "--dry-run", "zsh")
+	if err != nil {
+		t.Fatalf("link --dry-run failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "would link zsh: ~/.zshrc -> ~/dotfiles/zsh/.zshrc\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+	if _, err := os.Lstat(target); err == nil || !os.IsNotExist(err) {
+		t.Fatalf("dry-run created target: %v", err)
+	}
+	requireSnapshotUnchanged(t, home, homeBefore)
 }
 
 func TestUnlinkPrintsTargetAction(t *testing.T) {
@@ -232,6 +271,7 @@ links = [
 	if err := os.Symlink(source, target); err != nil {
 		t.Fatal(err)
 	}
+	homeBefore := snapshotTree(t, home)
 
 	out, errOut, err := executeCommand("--repo", repo, "unlink", "--dry-run", "zsh")
 	if err != nil {
@@ -243,6 +283,42 @@ links = [
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
 	assertSymlink(t, target, source)
+	requireSnapshotUnchanged(t, home, homeBefore)
+}
+
+func TestUnlinkHardDryRunPrintsWouldHardUnlinkAndLeavesLink(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	if err := os.WriteFile(source, []byte("export EDITOR=vim\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".zshrc")
+	if err := os.Symlink(source, target); err != nil {
+		t.Fatal(err)
+	}
+	homeBefore := snapshotTree(t, home)
+
+	out, errOut, err := executeCommand("--repo", repo, "unlink", "--hard", "--dry-run", "zsh")
+	if err != nil {
+		t.Fatalf("unlink --hard --dry-run failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "would hard-unlink zsh: ~/.zshrc (link removed)\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+	assertSymlink(t, target, source)
+	requireSnapshotUnchanged(t, home, homeBefore)
 }
 
 func TestInitPrintsRepositoryPathAndStoresDefaultRepository(t *testing.T) {
@@ -742,7 +818,13 @@ links = [
 ]
 `)
 
-	choices, errOut, err := executeCompletion("--repo", repo, "status", "--state", "")
+	choices, directive, errOut, err := executeCompletionResult(
+		"--repo",
+		repo,
+		"status",
+		"--state",
+		"",
+	)
 	if err != nil {
 		t.Fatalf("status state completion failed: %v\nstderr: %s", err, errOut)
 	}
@@ -759,8 +841,15 @@ links = [
 			"untracked",
 		},
 	)
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf(
+			"unexpected status state directive: want %d, got %d",
+			cobra.ShellCompDirectiveNoFileComp,
+			directive,
+		)
+	}
 
-	choices, errOut, err = executeCompletion(
+	choices, directive, errOut, err = executeCompletionResult(
 		"--repo",
 		repo,
 		"status",
@@ -777,6 +866,32 @@ links = [
 		choices,
 		[]string{"unlinked", "partial", "conflict", "missing-source", "empty", "untracked"},
 	)
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf(
+			"unexpected repeated state directive: want %d, got %d",
+			cobra.ShellCompDirectiveNoFileComp,
+			directive,
+		)
+	}
+
+	choices, directive, errOut, err = executeCompletionResult(
+		"--repo",
+		repo,
+		"status",
+		"--state",
+		"m",
+	)
+	if err != nil {
+		t.Fatalf("status state prefix completion failed: %v\nstderr: %s", err, errOut)
+	}
+	requireChoices(t, choices, []string{"missing-source"})
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf(
+			"unexpected state prefix directive: want %d, got %d",
+			cobra.ShellCompDirectiveNoFileComp,
+			directive,
+		)
+	}
 }
 
 func TestHelpOutputUsesConsistentSections(t *testing.T) {
@@ -1001,6 +1116,36 @@ func TestCompletionCommandGeneratesShellScripts(t *testing.T) {
 	}
 }
 
+func TestCompletionCommandCompletesSupportedShellNames(t *testing.T) {
+	setupCLIHomeOnly(t)
+
+	choices, directive, errOut, err := executeCompletionResult("completion", "")
+	if err != nil {
+		t.Fatalf("completion shell completion failed: %v\nstderr: %s", err, errOut)
+	}
+	requireChoices(t, choices, []string{"bash", "zsh", "fish", "powershell"})
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf(
+			"unexpected shell directive: want %d, got %d",
+			cobra.ShellCompDirectiveNoFileComp,
+			directive,
+		)
+	}
+
+	choices, directive, errOut, err = executeCompletionResult("completion", "p")
+	if err != nil {
+		t.Fatalf("completion shell prefix completion failed: %v\nstderr: %s", err, errOut)
+	}
+	requireChoices(t, choices, []string{"powershell"})
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf(
+			"unexpected shell prefix directive: want %d, got %d",
+			cobra.ShellCompDirectiveNoFileComp,
+			directive,
+		)
+	}
+}
+
 func TestPackageCommandsCompleteManifestPackages(t *testing.T) {
 	_, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
@@ -1018,17 +1163,103 @@ links = [
 
 	for _, command := range []string{"link", "unlink", "status"} {
 		t.Run(command, func(t *testing.T) {
-			choices, errOut, err := executeCompletion("--repo", repo, command, "")
+			choices, directive, errOut, err := executeCompletionResult("--repo", repo, command, "")
 			if err != nil {
 				t.Fatalf("%s completion failed: %v\nstderr: %s", command, err, errOut)
 			}
 			requireChoices(t, choices, []string{"tmux", "zsh"})
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Fatalf(
+					"%s directive mismatch: want %d, got %d",
+					command,
+					cobra.ShellCompDirectiveNoFileComp,
+					directive,
+				)
+			}
 
-			choices, errOut, err = executeCompletion("--repo", repo, command, "t")
+			choices, directive, errOut, err = executeCompletionResult("--repo", repo, command, "t")
 			if err != nil {
 				t.Fatalf("%s prefix completion failed: %v\nstderr: %s", command, err, errOut)
 			}
 			requireChoices(t, choices, []string{"tmux"})
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Fatalf(
+					"%s prefix directive mismatch: want %d, got %d",
+					command,
+					cobra.ShellCompDirectiveNoFileComp,
+					directive,
+				)
+			}
+		})
+	}
+}
+
+func TestManifestBackedCompletionsFailClosed(t *testing.T) {
+	home := setupCLIHomeOnly(t)
+	missingRepo := filepath.Join(home, "missing-dotfiles")
+	missingManifestRepo := filepath.Join(home, "missing-manifest")
+	if err := os.MkdirAll(missingManifestRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	invalidManifestRepo := filepath.Join(home, "invalid-manifest")
+	if err := os.MkdirAll(invalidManifestRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, invalidManifestRepo, "version = \"not-a-number\"\n")
+
+	tests := []struct {
+		name string
+		repo string
+		args []string
+	}{
+		{
+			name: "missing repository package",
+			repo: missingRepo,
+			args: []string{"link", ""},
+		},
+		{
+			name: "missing repository collection",
+			repo: missingRepo,
+			args: []string{"link", "--collection", ""},
+		},
+		{
+			name: "missing manifest package",
+			repo: missingManifestRepo,
+			args: []string{"unlink", ""},
+		},
+		{
+			name: "missing manifest collection",
+			repo: missingManifestRepo,
+			args: []string{"unlink", "--collection", ""},
+		},
+		{
+			name: "invalid manifest package",
+			repo: invalidManifestRepo,
+			args: []string{"status", ""},
+		},
+		{
+			name: "invalid manifest collection",
+			repo: invalidManifestRepo,
+			args: []string{"link", "--collection", ""},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"--repo", tt.repo}, tt.args...)
+			choices, directive, errOut, err := executeCompletionResult(args...)
+			if err != nil {
+				t.Fatalf("completion failed: %v\nstderr: %s", err, errOut)
+			}
+			requireCompletionEndedOnly(t, errOut)
+			requireChoices(t, choices, nil)
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Fatalf(
+					"unexpected fail-closed directive: want %d, got %d",
+					cobra.ShellCompDirectiveNoFileComp,
+					directive,
+				)
+			}
 		})
 	}
 }
@@ -1078,13 +1309,27 @@ packages = ["tmux", "zsh"]
 
 	for _, command := range []string{"link", "unlink"} {
 		t.Run(command, func(t *testing.T) {
-			choices, errOut, err := executeCompletion("--repo", repo, command, "--collection", "")
+			choices, directive, errOut, err := executeCompletionResult(
+				"--repo",
+				repo,
+				command,
+				"--collection",
+				"",
+			)
 			if err != nil {
 				t.Fatalf("%s collection completion failed: %v\nstderr: %s", command, err, errOut)
 			}
 			requireChoices(t, choices, []string{"desktop", "terminal"})
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Fatalf(
+					"%s collection directive mismatch: want %d, got %d",
+					command,
+					cobra.ShellCompDirectiveNoFileComp,
+					directive,
+				)
+			}
 
-			choices, errOut, err = executeCompletion(
+			choices, directive, errOut, err = executeCompletionResult(
 				"--repo",
 				repo,
 				command,
@@ -1100,6 +1345,67 @@ packages = ["tmux", "zsh"]
 				)
 			}
 			requireChoices(t, choices, []string{"terminal"})
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Fatalf(
+					"%s collection prefix directive mismatch: want %d, got %d",
+					command,
+					cobra.ShellCompDirectiveNoFileComp,
+					directive,
+				)
+			}
+
+			choices, directive, errOut, err = executeCompletionResult(
+				"--repo",
+				repo,
+				command,
+				"--collection",
+				"desktop",
+				"--collection",
+				"",
+			)
+			if err != nil {
+				t.Fatalf(
+					"%s repeated collection completion failed: %v\nstderr: %s",
+					command,
+					err,
+					errOut,
+				)
+			}
+			requireChoices(t, choices, []string{"terminal"})
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Fatalf(
+					"%s repeated collection directive mismatch: want %d, got %d",
+					command,
+					cobra.ShellCompDirectiveNoFileComp,
+					directive,
+				)
+			}
+
+			choices, directive, errOut, err = executeCompletionResult(
+				"--repo",
+				repo,
+				command,
+				"--all",
+				"--collection",
+				"",
+			)
+			if err != nil {
+				t.Fatalf(
+					"%s collection completion with --all failed: %v\nstderr: %s",
+					command,
+					err,
+					errOut,
+				)
+			}
+			requireChoices(t, choices, []string{"desktop", "terminal"})
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Fatalf(
+					"%s collection --all directive mismatch: want %d, got %d",
+					command,
+					cobra.ShellCompDirectiveNoFileComp,
+					directive,
+				)
+			}
 		})
 	}
 }
@@ -1114,7 +1420,17 @@ func TestAddPackageArgDoesNotCompleteManifestPackages(t *testing.T) {
 		t.Fatalf("add command missing completion function")
 	}
 
-	choices, directive := addCmd.ValidArgsFunction(addCmd, []string{"~/.config/tmux"}, "t")
+	choices, directive := addCmd.ValidArgsFunction(addCmd, nil, "")
+	requireChoices(t, choices, nil)
+	if directive != cobra.ShellCompDirectiveDefault {
+		t.Fatalf(
+			"unexpected first argument directive: want %d, got %d",
+			cobra.ShellCompDirectiveDefault,
+			directive,
+		)
+	}
+
+	choices, directive = addCmd.ValidArgsFunction(addCmd, []string{"~/.config/tmux"}, "t")
 	requireChoices(t, choices, nil)
 	if directive != cobra.ShellCompDirectiveNoFileComp {
 		t.Fatalf(
@@ -1122,6 +1438,28 @@ func TestAddPackageArgDoesNotCompleteManifestPackages(t *testing.T) {
 			cobra.ShellCompDirectiveNoFileComp,
 			directive,
 		)
+	}
+}
+
+func TestNoArgumentCommandsReturnNoFileCompletions(t *testing.T) {
+	setupCLIHomeOnly(t)
+
+	for _, command := range []string{"list", "repo", "version"} {
+		t.Run(command, func(t *testing.T) {
+			choices, directive, errOut, err := executeCompletionResult(command, "")
+			if err != nil {
+				t.Fatalf("%s no-argument completion failed: %v\nstderr: %s", command, err, errOut)
+			}
+			requireChoices(t, choices, nil)
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Fatalf(
+					"%s directive mismatch: want %d, got %d",
+					command,
+					cobra.ShellCompDirectiveNoFileComp,
+					directive,
+				)
+			}
+		})
 	}
 }
 
@@ -1949,6 +2287,13 @@ func executeCommandRenderedError(
 }
 
 func executeCompletion(args ...string) (choices []string, stderr string, err error) {
+	choices, _, stderr, err = executeCompletionResult(args...)
+	return choices, stderr, err
+}
+
+func executeCompletionResult(
+	args ...string,
+) (choices []string, directive cobra.ShellCompDirective, stderr string, err error) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	cmd := NewRootCommand(&out, &errOut)
@@ -1956,7 +2301,8 @@ func executeCompletion(args ...string) (choices []string, stderr string, err err
 	cmd.SetErr(&errOut)
 	cmd.SetArgs(append([]string{cobra.ShellCompNoDescRequestCmd}, args...))
 	err = cmd.Execute()
-	return completionChoices(stripANSI(out.String())), stripANSI(errOut.String()), err
+	output := stripANSI(out.String())
+	return completionChoices(output), completionDirective(output), stripANSI(errOut.String()), err
 }
 
 func completionChoices(output string) []string {
@@ -1972,10 +2318,93 @@ func completionChoices(output string) []string {
 	return choices
 }
 
+func completionDirective(output string) cobra.ShellCompDirective {
+	for line := range strings.SplitSeq(output, "\n") {
+		if !strings.HasPrefix(line, ":") {
+			continue
+		}
+		value, err := strconv.Atoi(strings.TrimPrefix(line, ":"))
+		if err != nil {
+			continue
+		}
+		return cobra.ShellCompDirective(value)
+	}
+	return cobra.ShellCompDirectiveDefault
+}
+
 func requireChoices(t *testing.T, got []string, want []string) {
 	t.Helper()
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected completions\nwant: %#v\ngot:  %#v", want, got)
+	}
+}
+
+func snapshotTree(t *testing.T, root string) string {
+	t.Helper()
+	if _, err := os.Lstat(root); err != nil {
+		if os.IsNotExist(err) {
+			return "<missing>\n"
+		}
+		t.Fatal(err)
+	}
+
+	var snapshot strings.Builder
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		snapshot.WriteString(rel)
+		snapshot.WriteString("\t")
+		snapshot.WriteString(info.Mode().String())
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			snapshot.WriteString("\t->")
+			snapshot.WriteString(target)
+		case info.Mode().IsRegular():
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			snapshot.WriteString("\t")
+			snapshot.Write(data)
+		}
+		snapshot.WriteString("\n")
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot.String()
+}
+
+func requireSnapshotUnchanged(t *testing.T, root string, before string) {
+	t.Helper()
+	if after := snapshotTree(t, root); after != before {
+		t.Fatalf("filesystem snapshot changed\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func requireCompletionEndedOnly(t *testing.T, stderr string) {
+	t.Helper()
+	if stderr == "" {
+		return
+	}
+	if strings.TrimSpace(
+		stderr,
+	) != "Completion ended with directive: ShellCompDirectiveNoFileComp" {
+		t.Fatalf("completion should only report its directive, got %q", stderr)
 	}
 }
 
