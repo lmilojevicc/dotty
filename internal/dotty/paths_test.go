@@ -188,6 +188,59 @@ func TestHomeRelativeEdges(t *testing.T) {
 	}
 }
 
+func TestPathSymlinkEquivalencePolicy(t *testing.T) {
+	dir := t.TempDir()
+	expected := filepath.Join(dir, "source")
+	alias := filepath.Join(dir, "alias")
+	directRelativeLink := filepath.Join(dir, "direct-relative")
+	aliasLink := filepath.Join(dir, "alias-link")
+	writeTextFile(t, expected, "content\n")
+	requireNoError(t, os.Symlink("source", directRelativeLink))
+	requireNoError(t, os.Symlink(expected, alias))
+	requireNoError(t, os.Symlink(alias, aliasLink))
+
+	if !symlinkPointsTo(directRelativeLink, expected) {
+		t.Fatal(
+			"Target Path symlinks may use relative text when it resolves to the exact source path",
+		)
+	}
+	if symlinkPointsTo(aliasLink, expected) {
+		t.Fatal(
+			"Target Path symlinks currently require the link text to resolve to the exact source path",
+		)
+	}
+	if !sameExistingPath(alias, expected) {
+		t.Fatal("existing filesystem paths use resolved symlink equivalence")
+	}
+}
+
+func TestPathSymlinkAliasStatusPolicy(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	alias := filepath.Join(repo, "zsh", "alias")
+	target := filepath.Join(home, ".zshrc")
+	writeTextFile(t, source, "source ~/.zprofile\n")
+	requireNoError(t, os.Symlink(source, alias))
+	requireNoError(t, os.Symlink(alias, target))
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+
+	report, err := NewService(repo, env).Status([]string{"zsh"})
+	requireNoError(t, err)
+	if len(report.Packages) != 1 {
+		t.Fatalf("expected one package status, got %d", len(report.Packages))
+	}
+	if got := report.Packages[0].State; got != StateConflict {
+		t.Fatalf("symlink alias Target Path should be a Conflict; got %s", got)
+	}
+}
+
 func TestResolveRepoPrecedence(t *testing.T) {
 	home, env := setupHome(t)
 	explicit := filepath.Join(home, "explicit")
@@ -215,6 +268,55 @@ func TestResolveRepoPrecedence(t *testing.T) {
 	requireNoError(t, err)
 	if got != configured {
 		t.Fatalf("config repo mismatch: want %s, got %s", configured, got)
+	}
+}
+
+func TestResolveRepoExpandsRelativeAndTildeInputs(t *testing.T) {
+	home, env := setupHome(t)
+	workspace := filepath.Join(home, "workspace")
+	requireNoError(t, os.MkdirAll(workspace, 0o755))
+	t.Chdir(workspace)
+
+	got, err := ResolveRepo("explicit-dotfiles", env)
+	requireNoError(t, err)
+	if want := filepath.Join(workspace, "explicit-dotfiles"); got != want {
+		t.Fatalf("relative explicit repo mismatch: want %s, got %s", want, got)
+	}
+
+	got, err = ResolveRepo("~/explicit-dotfiles", env)
+	requireNoError(t, err)
+	if want := filepath.Join(home, "explicit-dotfiles"); got != want {
+		t.Fatalf("tilde explicit repo mismatch: want %s, got %s", want, got)
+	}
+
+	envWithRelativeRepo := env
+	envWithRelativeRepo.DottyRepo = "env-dotfiles"
+	got, err = ResolveRepo("", envWithRelativeRepo)
+	requireNoError(t, err)
+	if want := filepath.Join(workspace, "env-dotfiles"); got != want {
+		t.Fatalf("relative DOTTY_REPO mismatch: want %s, got %s", want, got)
+	}
+
+	envWithTildeRepo := env
+	envWithTildeRepo.DottyRepo = "~/env-dotfiles"
+	got, err = ResolveRepo("", envWithTildeRepo)
+	requireNoError(t, err)
+	if want := filepath.Join(home, "env-dotfiles"); got != want {
+		t.Fatalf("tilde DOTTY_REPO mismatch: want %s, got %s", want, got)
+	}
+
+	writeTextFile(t, env.ConfigFilePath(), "repo = \"config-dotfiles\"\n")
+	got, err = ResolveRepo("", env)
+	requireNoError(t, err)
+	if want := filepath.Join(workspace, "config-dotfiles"); got != want {
+		t.Fatalf("relative config repo mismatch: want %s, got %s", want, got)
+	}
+
+	writeTextFile(t, env.ConfigFilePath(), "repo = \"~/config-dotfiles\"\n")
+	got, err = ResolveRepo("", env)
+	requireNoError(t, err)
+	if want := filepath.Join(home, "config-dotfiles"); got != want {
+		t.Fatalf("tilde config repo mismatch: want %s, got %s", want, got)
 	}
 }
 

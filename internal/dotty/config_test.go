@@ -27,3 +27,41 @@ func TestSaveConfigWritesRepoTOMLAndCreatesDirectory(t *testing.T) {
 		t.Fatalf("repo path should remain expandable: %v", err)
 	}
 }
+
+func TestLoadConfigRejectsMalformedAndWrongRepoShapes(t *testing.T) {
+	_, env := setupHome(t)
+
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name:    "malformed toml",
+			content: "repo = [\n",
+		},
+		{
+			name:    "repo integer",
+			content: "repo = 1\n",
+		},
+		{
+			name:    "repo array",
+			content: "repo = [\"~/dotfiles\"]\n",
+		},
+		{
+			name:    "repo table",
+			content: "repo = { path = \"~/dotfiles\" }\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writeTextFile(t, env.ConfigFilePath(), tt.content)
+			requireErrorContains(t, loadConfigError(env), "parse config")
+		})
+	}
+}
+
+func loadConfigError(env Env) error {
+	_, err := LoadConfig(env)
+	return err
+}

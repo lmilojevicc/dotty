@@ -225,6 +225,131 @@ func TestLoadManifestRejectsEmptyFileAndInvalidTOML(t *testing.T) {
 	requireErrorContains(t, loadManifestError(repo, env), "parse manifest")
 }
 
+func TestLoadManifestRejectsDuplicateTOMLStructures(t *testing.T) {
+	_, env := setupHome(t)
+	repo := t.TempDir()
+
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name: "duplicate package table",
+			content: `version = 1
+
+[packages.zsh]
+links = []
+
+[packages.zsh]
+links = []
+`,
+		},
+		{
+			name: "duplicate collection table",
+			content: `version = 1
+
+[packages.zsh]
+links = []
+
+[collections.shell]
+packages = ["zsh"]
+
+[collections.shell]
+packages = ["zsh"]
+`,
+		},
+		{
+			name: "duplicate links key",
+			content: `version = 1
+
+[packages.zsh]
+links = []
+links = []
+`,
+		},
+		{
+			name: "duplicate collection packages key",
+			content: `version = 1
+
+[packages.zsh]
+links = []
+
+[collections.shell]
+packages = ["zsh"]
+packages = ["zsh"]
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writeDottyManifest(t, repo, tt.content)
+			requireErrorContains(t, loadManifestError(repo, env), "parse manifest")
+		})
+	}
+}
+
+func TestLoadManifestRejectsWrongTOMLValueShapes(t *testing.T) {
+	_, env := setupHome(t)
+	repo := t.TempDir()
+
+	tests := []struct {
+		name    string
+		content string
+		wantErr string
+	}{
+		{
+			name:    "version string",
+			content: `version = "1"`,
+			wantErr: "parse manifest",
+		},
+		{
+			name:    "packages array",
+			content: "version = 1\npackages = []\n",
+			wantErr: "parse manifest",
+		},
+		{
+			name: "links string",
+			content: `version = 1
+
+[packages.zsh]
+links = "not a list"
+`,
+			wantErr: "parse manifest",
+		},
+		{
+			name: "link source integer",
+			content: `version = 1
+
+[packages.zsh]
+links = [
+  { source = 1, target = "~/.zshrc" },
+]
+`,
+			wantErr: "parse manifest",
+		},
+		{
+			name: "collection packages string",
+			content: `version = 1
+
+[packages.zsh]
+links = []
+
+[collections.shell]
+packages = "zsh"
+`,
+			wantErr: "parse manifest",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writeDottyManifest(t, repo, tt.content)
+			requireErrorContains(t, loadManifestError(repo, env), tt.wantErr)
+		})
+	}
+}
+
 func TestLoadManifestReportsReadError(t *testing.T) {
 	_, env := setupHome(t)
 	repo := t.TempDir()

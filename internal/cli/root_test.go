@@ -1100,6 +1100,63 @@ func TestRepoCommandUsesDottyRepoEnvironmentOverride(t *testing.T) {
 	}
 }
 
+func TestRepoCommandExpandsRelativeRepoFlag(t *testing.T) {
+	home := setupCLIHomeOnly(t)
+	t.Chdir(home)
+
+	out, errOut, err := executeCommand("--repo", "dotfiles", "repo")
+	if err != nil {
+		t.Fatalf("repo failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "Repository: ~/dotfiles\nConfig: ~/.config/dotty/config.toml\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+}
+
+func TestRepoCommandUsesCustomXDGConfigHome(t *testing.T) {
+	home := setupCLIHomeOnly(t)
+	xdg := filepath.Join(t.TempDir(), "xdg-config")
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	writeConfig(
+		t,
+		filepath.Join(xdg, "dotty", "config.toml"),
+		fmt.Sprintf("repo = %q\n", filepath.Join(home, "dotfiles")),
+	)
+
+	out, errOut, err := executeCommand("repo")
+	if err != nil {
+		t.Fatalf("repo failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := fmt.Sprintf(
+		"Repository: ~/dotfiles\nConfig: %s\n",
+		filepath.Join(xdg, "dotty", "config.toml"),
+	)
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+}
+
+func TestRepoCommandReportsMalformedConfigWithoutUsage(t *testing.T) {
+	home := setupCLIHomeOnly(t)
+	configPath := filepath.Join(home, ".config", "dotty", "config.toml")
+	writeConfig(t, configPath, "repo = [\n")
+
+	stdout, rendered, err := executeCommandRenderedError(t, "repo")
+	if err == nil {
+		t.Fatal("expected malformed config error")
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(rendered, "error: parse config "+configPath) {
+		t.Fatalf("expected parse config diagnostic for %s, got %q", configPath, rendered)
+	}
+	requireNoUsageDiagnostic(t, rendered)
+}
+
 func TestCompletionCommandGeneratesShellScripts(t *testing.T) {
 	tests := []struct {
 		shell string
@@ -2542,6 +2599,16 @@ func writeManifest(t *testing.T, repo string, content string) {
 		[]byte(content),
 		0o644,
 	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeConfig(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

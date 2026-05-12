@@ -39,6 +39,15 @@ func TestEnvFromOSUsesXDGConfigHomeAndDottyRepo(t *testing.T) {
 	}
 }
 
+func TestEnvConfigFilePathUsesCustomXDGConfigHome(t *testing.T) {
+	xdg := filepath.Join(t.TempDir(), "xdg-config")
+	env := Env{XDGConfigHome: xdg}
+
+	if got, want := env.ConfigFilePath(), filepath.Join(xdg, "dotty", "config.toml"); got != want {
+		t.Fatalf("config file path mismatch: want %s, got %s", want, got)
+	}
+}
+
 func TestEnvFromOSErrorsWithoutHome(t *testing.T) {
 	t.Setenv("HOME", "")
 
