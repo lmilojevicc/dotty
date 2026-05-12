@@ -637,6 +637,32 @@ links = [
 	assertSymlink(t, target, filepath.Join(repo, "zsh", ".zshrc"))
 }
 
+func TestLinkTreatsBrokenTargetSymlinkAsConflictUnlessForced(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	writeTextFile(t, source, "export EDITOR=vim\n")
+	target := filepath.Join(home, ".zshrc")
+	missingTarget := filepath.Join(home, "missing-zshrc")
+	requireNoError(t, os.Symlink(missingTarget, target))
+	svc := NewService(repo, env)
+
+	assertPackageState(t, svc, "zsh", StateConflict)
+	_, err := svc.Link(LinkOptions{Packages: []string{"zsh"}})
+	requireErrorContains(t, err, "symlink to another source")
+	assertSymlink(t, target, missingTarget)
+
+	_, err = svc.Link(LinkOptions{Packages: []string{"zsh"}, Force: true})
+	requireNoError(t, err)
+	assertSymlink(t, target, source)
+	assertPackageState(t, svc, "zsh", StateLinked)
+}
+
 func TestLinkNormalizesExpectedRelativeSymlinkToAbsoluteLink(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
@@ -660,6 +686,36 @@ links = [
 	_, err = NewService(repo, env).Link(LinkOptions{Packages: []string{"tmux"}})
 	requireNoError(t, err)
 	assertSymlink(t, target, source)
+}
+
+func TestLinkForceReplacesOnlySelectedPackageConflicts(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux"), 0o755))
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
+	tmuxTarget := filepath.Join(home, ".config", "tmux")
+	zshTarget := filepath.Join(home, ".zshrc")
+	writeTextFile(t, filepath.Join(tmuxTarget, "tmux.conf"), "set -g status on\n")
+	writeTextFile(t, zshTarget, "local zshrc\n")
+
+	_, err := NewService(repo, env).Link(LinkOptions{
+		Packages: []string{"zsh"},
+		Force:    true,
+	})
+	requireNoError(t, err)
+
+	assertSymlink(t, zshTarget, filepath.Join(repo, "zsh", ".zshrc"))
+	requireFileContent(t, filepath.Join(tmuxTarget, "tmux.conf"), "set -g status on\n")
 }
 
 func TestLinkRollsBackEarlierLinksWhenLaterMappingFails(t *testing.T) {
@@ -694,6 +750,52 @@ links = [
 	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"zsh"}, Force: true})
 	requireErrorContains(t, err, "source \".missing\" is missing")
 	requireFileContent(t, target, "local copy\n")
+	requireNoDottyBackups(t, home)
+}
+
+func TestLinkForceReportsMoveAsideFailureWithoutReplacingConflict(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
+	target := filepath.Join(home, ".zshrc")
+	writeTextFile(t, target, "local copy\n")
+	forceRenameError(t, syscall.EPERM)
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"zsh"}, Force: true})
+	requireErrorContains(t, err, "move "+target+" aside")
+	requireFileContent(t, target, "local copy\n")
+	requireNoDottyBackups(t, home)
+}
+
+func TestLinkForceRollsBackEarlierReplacementWhenLaterMappingFailsDuringExecution(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = "config-file", target = "~/.config" },
+  { source = ".zshrc", target = "~/.config/zsh/.zshrc" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "zsh", "config-file"), "not a directory\n")
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
+	targetDir := filepath.Join(home, ".config")
+	writeTextFile(t, filepath.Join(targetDir, "keep"), "preserve me\n")
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"zsh"}, Force: true})
+	requireErrorContains(t, err, "not a directory")
+
+	info, statErr := os.Lstat(targetDir)
+	requireNoError(t, statErr)
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("%s should have rolled back to a real directory, info=%v", targetDir, info)
+	}
+	requireFileContent(t, filepath.Join(targetDir, "keep"), "preserve me\n")
+	requireNoPath(t, filepath.Join(targetDir, "zsh", ".zshrc"))
 	requireNoDottyBackups(t, home)
 }
 
