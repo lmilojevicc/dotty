@@ -31,11 +31,132 @@ func TestAddFileToNewAndExistingPackageUsesBasenameSource(t *testing.T) {
 		t.Fatalf("unexpected add result: %#v", result)
 	}
 	assertSymlink(t, zprofile, filepath.Join(repo, "zsh", ".zprofile"))
+	requireFileContent(t, filepath.Join(repo, "zsh", ".zprofile"), "export PATH=$HOME/bin:$PATH\n")
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+  { source = ".zprofile", target = "~/.zprofile" },
+]
+`)
 
 	manifest, err := LoadManifest(repo, env)
 	requireNoError(t, err)
 	if got := len(manifest.Packages["zsh"].Links); got != 2 {
 		t.Fatalf("expected 2 zsh link mappings, got %d", got)
+	}
+}
+
+func TestAddDirectoryAsNewPackageRecordsRootSourceAndManifest(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	svc, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	target := filepath.Join(home, ".config", "tmux")
+	writeTextFile(t, filepath.Join(target, "tmux.conf"), "set -g mouse on\n")
+
+	result, err := svc.Add(target, "tmux")
+	requireNoError(t, err)
+	if result.Source != "." || result.Target != "~/.config/tmux" ||
+		result.SourcePath != "~/dotfiles/tmux" {
+		t.Fatalf("unexpected add result: %#v", result)
+	}
+	assertSymlink(t, target, filepath.Join(repo, "tmux"))
+	requireFileContent(t, filepath.Join(repo, "tmux", "tmux.conf"), "set -g mouse on\n")
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
+}
+
+func TestAddDirectoryToExistingPackageUsesBasenameSource(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	svc, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	zshrc := filepath.Join(home, ".zshrc")
+	writeTextFile(t, zshrc, "export EDITOR=vim\n")
+	_, err = svc.Add(zshrc, "config")
+	requireNoError(t, err)
+
+	nvimTarget := filepath.Join(home, ".config", "nvim")
+	writeTextFile(t, filepath.Join(nvimTarget, "init.vim"), "set number\n")
+	result, err := svc.Add(nvimTarget, "config")
+	requireNoError(t, err)
+	if result.Source != "nvim" || result.Target != "~/.config/nvim" {
+		t.Fatalf("unexpected add result: %#v", result)
+	}
+	assertSymlink(t, nvimTarget, filepath.Join(repo, "config", "nvim"))
+	requireFileContent(t, filepath.Join(repo, "config", "nvim", "init.vim"), "set number\n")
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.config]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+  { source = "nvim", target = "~/.config/nvim" },
+]
+`)
+}
+
+func TestAddExternalSymlinkToRegularFileCopiesSourceAndRecordsTarget(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	svc, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	oldSource := filepath.Join(home, "old-stow", ".zshrc")
+	writeTextFile(t, oldSource, "export EDITOR=nvim\n")
+	target := filepath.Join(home, ".zshrc")
+	requireNoError(t, os.Symlink(oldSource, target))
+
+	result, err := svc.Add(target, "zsh")
+	requireNoError(t, err)
+	if result.Source != ".zshrc" || result.Target != "~/.zshrc" {
+		t.Fatalf("unexpected add result: %#v", result)
+	}
+	assertSymlink(t, target, filepath.Join(repo, "zsh", ".zshrc"))
+	requireFileContent(t, oldSource, "export EDITOR=nvim\n")
+	requireFileContent(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=nvim\n")
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+}
+
+func TestAddAlreadyAdoptedTargetIsIdempotent(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	svc, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	target := filepath.Join(home, ".zshrc")
+	writeTextFile(t, target, "export EDITOR=vim\n")
+	_, err = svc.Add(target, "zsh")
+	requireNoError(t, err)
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	result, err := svc.Add(target, "zsh")
+	requireNoError(t, err)
+	if result.Source != ".zshrc" || result.Target != "~/.zshrc" {
+		t.Fatalf("unexpected add result: %#v", result)
+	}
+	assertSymlink(t, target, filepath.Join(repo, "zsh", ".zshrc"))
+	requireFileContent(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+	manifest, err := LoadManifest(repo, env)
+	requireNoError(t, err)
+	if got := len(manifest.Packages["zsh"].Links); got != 1 {
+		t.Fatalf("expected idempotent add to keep one Link Mapping, got %d", got)
 	}
 }
 
@@ -53,6 +174,169 @@ func TestAddRejectsMissingTargetWithoutChangingManifestOrRepository(t *testing.T
 
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 	requireNoPath(t, filepath.Join(repo, "zsh"))
+}
+
+func TestAddRejectsRepositorySidePackageSourceConflictWithoutMutation(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	_, err := InitRepo(repo, env)
+	requireNoError(t, err)
+	target := filepath.Join(home, ".zshrc")
+	writeTextFile(t, target, "local config\n")
+	existingSource := filepath.Join(repo, "zsh", ".zshrc")
+	writeTextFile(t, existingSource, "existing package source\n")
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = NewService(repo, env).Add(target, "zsh")
+	requireErrorContains(t, err, "repo-side package source")
+	requireErrorContains(t, err, "already exists")
+
+	requireFileContent(t, target, "local config\n")
+	requireFileContent(t, existingSource, "existing package source\n")
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
+func TestAddRejectsBrokenAndLoopingSymlinkTargetsWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name        string
+		setupTarget func(t *testing.T, target string) []string
+	}{
+		{
+			name: "broken symlink",
+			setupTarget: func(t *testing.T, target string) []string {
+				t.Helper()
+				requireNoError(
+					t,
+					os.Symlink(filepath.Join(filepath.Dir(target), "missing"), target),
+				)
+				return []string{target}
+			},
+		},
+		{
+			name: "symlink loop",
+			setupTarget: func(t *testing.T, target string) []string {
+				t.Helper()
+				other := filepath.Join(filepath.Dir(target), ".zshrc-other")
+				requireNoError(t, os.Symlink(other, target))
+				requireNoError(t, os.Symlink(target, other))
+				return []string{target, other}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home, env := setupHome(t)
+			repo := filepath.Join(home, "dotfiles")
+			_, err := InitRepo(repo, env)
+			requireNoError(t, err)
+			target := filepath.Join(home, ".zshrc")
+			symlinks := tt.setupTarget(t, target)
+			linkTargetsBefore := map[string]string{}
+			for _, symlink := range symlinks {
+				linkTarget, err := os.Readlink(symlink)
+				requireNoError(t, err)
+				linkTargetsBefore[symlink] = linkTarget
+			}
+			manifestBefore, err := os.ReadFile(ManifestPath(repo))
+			requireNoError(t, err)
+
+			_, err = NewService(repo, env).Add(target, "zsh")
+			requireErrorContains(t, err, "resolve symlink")
+
+			requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+			requireNoPath(t, filepath.Join(repo, "zsh"))
+			for symlink, wantTarget := range linkTargetsBefore {
+				info, err := os.Lstat(symlink)
+				requireNoError(t, err)
+				if info.Mode()&os.ModeSymlink == 0 {
+					t.Fatalf("%s should remain a symlink, info=%v", symlink, info)
+				}
+				gotTarget, err := os.Readlink(symlink)
+				requireNoError(t, err)
+				if gotTarget != wantTarget {
+					t.Fatalf(
+						"%s symlink target mismatch: want %s, got %s",
+						symlink,
+						wantTarget,
+						gotTarget,
+					)
+				}
+			}
+		})
+	}
+}
+
+func TestAddRejectsDangerousTargetPathsWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     func(home, repo string) string
+		setup      func(t *testing.T, target string)
+		assertSafe func(t *testing.T, home, repo, target string, manifestBefore []byte)
+	}{
+		{
+			name:   "home directory",
+			target: func(home, repo string) string { return home },
+			setup:  func(t *testing.T, target string) {},
+			assertSafe: func(t *testing.T, home, repo, target string, manifestBefore []byte) {
+				t.Helper()
+				info, err := os.Lstat(home)
+				requireNoError(t, err)
+				if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+					t.Fatalf("home should remain a real directory, info=%v", info)
+				}
+				requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+				requireNoPath(t, filepath.Join(repo, "pkg"))
+			},
+		},
+		{
+			name:   "dotfiles repository",
+			target: func(home, repo string) string { return repo },
+			setup:  func(t *testing.T, target string) {},
+			assertSafe: func(t *testing.T, home, repo, target string, manifestBefore []byte) {
+				t.Helper()
+				info, err := os.Lstat(repo)
+				requireNoError(t, err)
+				if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+					t.Fatalf("repository should remain a real directory, info=%v", info)
+				}
+				requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+				requireNoPath(t, filepath.Join(repo, "pkg"))
+			},
+		},
+		{
+			name:   "inside dotfiles repository",
+			target: func(home, repo string) string { return filepath.Join(repo, "loose") },
+			setup: func(t *testing.T, target string) {
+				t.Helper()
+				writeTextFile(t, target, "untracked repository content\n")
+			},
+			assertSafe: func(t *testing.T, home, repo, target string, manifestBefore []byte) {
+				t.Helper()
+				requireFileContent(t, target, "untracked repository content\n")
+				requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+				requireNoPath(t, filepath.Join(repo, "pkg"))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home, env := setupHome(t)
+			repo := filepath.Join(home, "dotfiles")
+			_, err := InitRepo(repo, env)
+			requireNoError(t, err)
+			target := tt.target(home, repo)
+			tt.setup(t, target)
+			manifestBefore, err := os.ReadFile(ManifestPath(repo))
+			requireNoError(t, err)
+
+			_, err = NewService(repo, env).Add(target, "pkg")
+			requireErrorContains(t, err, "dangerous Target Path")
+			tt.assertSafe(t, home, repo, target, manifestBefore)
+		})
+	}
 }
 
 func TestAddDryRunValidatesAndDoesNotMoveLinkOrWriteManifest(t *testing.T) {

@@ -96,13 +96,25 @@ func TestInPlaceAdoptionFromExistingStowSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := svc.Add(target, "tmux"); err != nil {
+	result, err := svc.Add(target, "tmux")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if result.Source != "." || result.Target != "~/.config/tmux" ||
+		result.SourcePath != "~/dot-example/tmux" {
+		t.Fatalf("unexpected add result: %#v", result)
 	}
 	assertSymlink(t, target, filepath.Join(repo, "tmux"))
 	if _, err := os.Stat(filepath.Join(repo, "tmux", "tmux.conf")); err != nil {
 		t.Fatal(err)
 	}
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
 	assertTmuxPackageState(t, svc, StateLinked)
 }
 
