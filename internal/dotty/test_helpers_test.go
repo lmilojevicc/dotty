@@ -67,14 +67,14 @@ func writeDottyManifest(t *testing.T, repo, content string) {
 	writeTextFile(t, ManifestPath(repo), content)
 }
 
-func assertPackageState(t *testing.T, svc Service, packageName string, want State) {
+func assertZshPackageState(t *testing.T, svc Service, want State) {
 	t.Helper()
-	report, err := svc.Status([]string{packageName})
+	report, err := svc.Status([]string{"zsh"})
 	requireNoError(t, err)
 	if len(report.Packages) != 1 {
 		t.Fatalf("expected one package status, got %d", len(report.Packages))
 	}
 	if got := report.Packages[0].State; got != want {
-		t.Fatalf("state mismatch for %s: want %s, got %s", packageName, want, got)
+		t.Fatalf("state mismatch for zsh: want %s, got %s", want, got)
 	}
 }

@@ -1,6 +1,7 @@
 package dotty
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -243,6 +244,24 @@ func TestSaveManifestWritesFormattedManifest(t *testing.T) {
 	}))
 
 	requireFileContent(t, ManifestPath(repo), FormatManifest(manifest))
+}
+
+func TestSaveManifestRollbackRestoresPreviousManifestBytes(t *testing.T) {
+	_, env := setupHome(t)
+	repo := t.TempDir()
+	original := "version = 1\n# hand-written comment kept only by rollback\n"
+	writeDottyManifest(t, repo, original)
+	manifest := NewManifest()
+	manifest.Packages["zsh"] = Package{Links: []LinkMapping{{Source: ".zshrc", Target: "~/.zshrc"}}}
+
+	err := RunAtomic(func(tx *Tx) error {
+		requireNoError(t, SaveManifest(tx, repo, manifest, env))
+		requireFileContent(t, ManifestPath(repo), FormatManifest(manifest))
+		return errors.New("stop")
+	})
+	requireErrorContains(t, err, "stop")
+
+	requireFileContent(t, ManifestPath(repo), original)
 }
 
 func TestSaveManifestRejectsInvalidManifest(t *testing.T) {

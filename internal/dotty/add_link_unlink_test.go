@@ -1,6 +1,7 @@
 package dotty
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -652,7 +653,7 @@ links = [
 	requireNoError(t, os.Symlink(missingTarget, target))
 	svc := NewService(repo, env)
 
-	assertPackageState(t, svc, "zsh", StateConflict)
+	assertZshPackageState(t, svc, StateConflict)
 	_, err := svc.Link(LinkOptions{Packages: []string{"zsh"}})
 	requireErrorContains(t, err, "symlink to another source")
 	assertSymlink(t, target, missingTarget)
@@ -660,7 +661,7 @@ links = [
 	_, err = svc.Link(LinkOptions{Packages: []string{"zsh"}, Force: true})
 	requireNoError(t, err)
 	assertSymlink(t, target, source)
-	assertPackageState(t, svc, "zsh", StateLinked)
+	assertZshPackageState(t, svc, StateLinked)
 }
 
 func TestLinkNormalizesExpectedRelativeSymlinkToAbsoluteLink(t *testing.T) {
@@ -994,6 +995,262 @@ links = [
 	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
 	requireErrorContains(t, err, "source \".zshrc\" is missing")
 	assertSymlink(t, target, source)
+}
+
+func TestSoftUnlinkPrevalidatesCopyabilityBeforeRemovingLink(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".", target = "~/.config/zsh" },
+]
+`)
+	source := filepath.Join(repo, "zsh")
+	requireNoError(t, os.MkdirAll(source, 0o755))
+	requireNoError(t, syscall.Mkfifo(filepath.Join(source, "fifo"), 0o600))
+	target := filepath.Join(home, ".config", "zsh")
+	requireNoError(t, os.Symlink(source, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	requireErrorContains(t, err, "unsupported file type")
+
+	assertSymlink(t, target, source)
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
+func TestSoftUnlinkLeavesTargetCopyAsConflictForStatusAndPlainLink(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	writeTextFile(t, source, "export EDITOR=vim\n")
+	target := filepath.Join(home, ".zshrc")
+	requireNoError(t, os.Symlink(source, target))
+	svc := NewService(repo, env)
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	requireNoError(t, err)
+
+	requireFileContent(t, target, "export EDITOR=vim\n")
+	requireFileContent(t, source, "export EDITOR=vim\n")
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+	assertZshPackageState(t, svc, StateConflict)
+
+	_, err = svc.Link(LinkOptions{Packages: []string{"zsh"}})
+	requireErrorContains(t, err, "already exists")
+	requireFileContent(t, target, "export EDITOR=vim\n")
+	assertZshPackageState(t, svc, StateConflict)
+}
+
+func TestHardUnlinkWithMissingSourceOnlyRemovesExpectedLinks(t *testing.T) {
+	tests := []struct {
+		name       string
+		setup      func(t *testing.T, home, source, target string)
+		wantErr    string
+		assertSafe func(t *testing.T, target, source string)
+	}{
+		{
+			name: "expected link",
+			setup: func(t *testing.T, home, source, target string) {
+				t.Helper()
+				requireNoError(t, os.Symlink(source, target))
+			},
+			assertSafe: func(t *testing.T, target, source string) {
+				t.Helper()
+				requireNoPath(t, target)
+			},
+		},
+		{
+			name:  "absent target",
+			setup: func(t *testing.T, home, source, target string) { t.Helper() },
+			assertSafe: func(t *testing.T, target, source string) {
+				t.Helper()
+				requireNoPath(t, target)
+			},
+		},
+		{
+			name: "non-symlink conflict",
+			setup: func(t *testing.T, home, source, target string) {
+				t.Helper()
+				writeTextFile(t, target, "local copy\n")
+			},
+			wantErr: "not an expected dotty link",
+			assertSafe: func(t *testing.T, target, source string) {
+				t.Helper()
+				requireFileContent(t, target, "local copy\n")
+			},
+		},
+		{
+			name: "wrong symlink",
+			setup: func(t *testing.T, home, source, target string) {
+				t.Helper()
+				wrongSource := filepath.Join(home, "wrong")
+				writeTextFile(t, wrongSource, "wrong\n")
+				requireNoError(t, os.Symlink(wrongSource, target))
+			},
+			wantErr: "symlink to another source",
+			assertSafe: func(t *testing.T, target, source string) {
+				t.Helper()
+				assertSymlink(t, target, filepath.Join(filepath.Dir(target), "wrong"))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+			source := filepath.Join(repo, "zsh", ".zshrc")
+			target := filepath.Join(home, ".zshrc")
+			tt.setup(t, home, source, target)
+			manifestBefore, err := os.ReadFile(ManifestPath(repo))
+			requireNoError(t, err)
+
+			_, err = NewService(repo, env).Unlink(UnlinkOptions{
+				Packages: []string{"zsh"},
+				Hard:     true,
+			})
+			if tt.wantErr == "" {
+				requireNoError(t, err)
+			} else {
+				requireErrorContains(t, err, tt.wantErr)
+			}
+
+			tt.assertSafe(t, target, source)
+			requireNoPath(t, source)
+			requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+		})
+	}
+}
+
+func TestSoftUnlinkRollsBackRemovedLinkWhenCopyFailsDuringExecution(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	writeTextFile(t, source, "export EDITOR=vim\n")
+	target := filepath.Join(home, ".zshrc")
+	requireNoError(t, os.Symlink(source, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+	forceCopyPathErrorAfter(t, 0, errors.New("copy during unlink failed"))
+
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	requireErrorContains(t, err, "copy during unlink failed")
+
+	assertSymlink(t, target, source)
+	requireFileContent(t, source, "export EDITOR=vim\n")
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+	assertZshPackageState(t, NewService(repo, env), StateLinked)
+}
+
+func TestSoftUnlinkRollsBackEarlierTargetCopyWhenLaterMappingCopyFails(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+  { source = ".zprofile", target = "~/.zprofile" },
+]
+`)
+	zshrcSource := filepath.Join(repo, "zsh", ".zshrc")
+	zprofileSource := filepath.Join(repo, "zsh", ".zprofile")
+	writeTextFile(t, zshrcSource, "export EDITOR=vim\n")
+	writeTextFile(t, zprofileSource, "export PATH=$HOME/bin:$PATH\n")
+	zshrcTarget := filepath.Join(home, ".zshrc")
+	zprofileTarget := filepath.Join(home, ".zprofile")
+	requireNoError(t, os.Symlink(zshrcSource, zshrcTarget))
+	requireNoError(t, os.Symlink(zprofileSource, zprofileTarget))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+	forceCopyPathErrorAfter(t, 1, errors.New("second copy during unlink failed"))
+
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	requireErrorContains(t, err, "second copy during unlink failed")
+
+	assertSymlink(t, zshrcTarget, zshrcSource)
+	assertSymlink(t, zprofileTarget, zprofileSource)
+	requireFileContent(t, zshrcSource, "export EDITOR=vim\n")
+	requireFileContent(t, zprofileSource, "export PATH=$HOME/bin:$PATH\n")
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+	assertZshPackageState(t, NewService(repo, env), StateLinked)
+}
+
+func TestHardUnlinkRollsBackEarlierRemovalWhenLaterRemoveFails(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+  { source = ".zprofile", target = "~/.zprofile" },
+]
+`)
+	zshrcSource := filepath.Join(repo, "zsh", ".zshrc")
+	zprofileSource := filepath.Join(repo, "zsh", ".zprofile")
+	writeTextFile(t, zshrcSource, "export EDITOR=vim\n")
+	writeTextFile(t, zprofileSource, "export PATH=$HOME/bin:$PATH\n")
+	zshrcTarget := filepath.Join(home, ".zshrc")
+	zprofileTarget := filepath.Join(home, ".zprofile")
+	requireNoError(t, os.Symlink(zshrcSource, zshrcTarget))
+	requireNoError(t, os.Symlink(zprofileSource, zprofileTarget))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+	forceRemovePathErrorAfter(t, 1, errors.New("second remove during unlink failed"))
+
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{
+		Packages: []string{"zsh"},
+		Hard:     true,
+	})
+	requireErrorContains(t, err, "second remove during unlink failed")
+
+	assertSymlink(t, zshrcTarget, zshrcSource)
+	assertSymlink(t, zprofileTarget, zprofileSource)
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+	assertZshPackageState(t, NewService(repo, env), StateLinked)
+}
+
+func TestUnlinkReportsRollbackFailure(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	writeTextFile(t, source, "export EDITOR=vim\n")
+	target := filepath.Join(home, ".zshrc")
+	requireNoError(t, os.Symlink(source, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+	forceCopyPathErrorAfter(t, 0, errors.New("copy during unlink failed"))
+	forceSymlinkPathError(t, errors.New("restore symlink failed"))
+
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	requireErrorContains(t, err, "copy during unlink failed")
+	requireErrorContains(t, err, "rollback failed")
+	requireErrorContains(t, err, "restore symlink failed")
+
+	requireNoPath(t, target)
+	requireFileContent(t, source, "export EDITOR=vim\n")
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 }
 
 func setupLinkedPackageTest(t *testing.T, manifest string) (home string, repo string, env Env) {

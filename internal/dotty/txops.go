@@ -8,7 +8,12 @@ import (
 	"syscall"
 )
 
-var renamePath = os.Rename
+var (
+	renamePath  = os.Rename
+	removePath  = os.Remove
+	symlinkPath = os.Symlink
+	copyPathOp  = copyPath
+)
 
 func EnsureDirTx(tx *Tx, dir string, perm os.FileMode) error {
 	dir = filepath.Clean(dir)
@@ -23,7 +28,7 @@ func EnsureDirTx(tx *Tx, dir string, perm os.FileMode) error {
 		tx.AddRollback(func() error {
 			var errs []error
 			for _, path := range missing {
-				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				if err := removePath(path); err != nil && !os.IsNotExist(err) {
 					errs = append(errs, err)
 				}
 			}
@@ -76,7 +81,7 @@ func WriteFileTx(tx *Tx, path string, data []byte, perm os.FileMode) error {
 		if existed {
 			return os.WriteFile(path, previous, perm)
 		}
-		return os.Remove(path)
+		return removePath(path)
 	})
 	return nil
 }
@@ -102,7 +107,7 @@ func CopyPathTx(tx *Tx, src, dst string) error {
 	if err != nil {
 		return err
 	}
-	if err := copyPath(src, dst); err != nil {
+	if err := copyPathOp(src, dst); err != nil {
 		if !dstExisted {
 			_ = os.RemoveAll(dst)
 		}
@@ -126,11 +131,11 @@ func RemoveSymlinkTx(tx *Tx, path string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(path); err != nil {
+	if err := removePath(path); err != nil {
 		return err
 	}
 	tx.AddRollback(func() error {
-		return os.Symlink(target, path)
+		return symlinkPath(target, path)
 	})
 	return nil
 }
@@ -139,11 +144,11 @@ func CreateSymlinkTx(tx *Tx, sourceAbs, targetAbs string) error {
 	if err := EnsureDirTx(tx, dirOf(targetAbs), 0o755); err != nil {
 		return err
 	}
-	if err := os.Symlink(sourceAbs, targetAbs); err != nil {
+	if err := symlinkPath(sourceAbs, targetAbs); err != nil {
 		return fmt.Errorf("create symlink %s -> %s: %w", targetAbs, sourceAbs, err)
 	}
 	tx.AddRollback(func() error {
-		return os.Remove(targetAbs)
+		return removePath(targetAbs)
 	})
 	return nil
 }
@@ -154,7 +159,7 @@ func MoveAsideTx(tx *Tx, path string) error {
 	if err != nil {
 		return fmt.Errorf("create backup path for %s: %w", path, err)
 	}
-	if err := os.Remove(backup); err != nil {
+	if err := removePath(backup); err != nil {
 		return fmt.Errorf("prepare backup path for %s: %w", path, err)
 	}
 	if err := movePathWithFallback(path, backup); err != nil {
@@ -190,7 +195,7 @@ func renameOrCopyRemove(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	if err := copyPath(src, dst); err != nil {
+	if err := copyPathOp(src, dst); err != nil {
 		if !dstExisted {
 			_ = os.RemoveAll(dst)
 		}

@@ -197,6 +197,28 @@ func TestCopyPathTxCopiesDirectorySymlinksAndRollsBack(t *testing.T) {
 	requireNoPath(t, dst)
 }
 
+func TestCreateSymlinkTxRollbackRemovesCreatedParents(t *testing.T) {
+	dir := t.TempDir()
+	keptParent := filepath.Join(dir, "home")
+	source := filepath.Join(dir, "source")
+	target := filepath.Join(keptParent, ".config", "zsh", ".zshrc")
+	writeTextFile(t, source, "export EDITOR=vim\n")
+	requireNoError(t, os.MkdirAll(keptParent, 0o755))
+
+	err := RunAtomic(func(tx *Tx) error {
+		requireNoError(t, CreateSymlinkTx(tx, source, target))
+		assertSymlink(t, target, source)
+		return errors.New("stop")
+	})
+	requireErrorContains(t, err, "stop")
+
+	requireNoPath(t, target)
+	requireNoPath(t, filepath.Join(keptParent, ".config"))
+	if _, err := os.Lstat(keptParent); err != nil {
+		t.Fatalf("pre-existing parent should remain: %v", err)
+	}
+}
+
 func TestCopyPathTxRejectsExistingDestination(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.txt")
@@ -242,5 +264,48 @@ func forceRenameError(t *testing.T, errno syscall.Errno) {
 	}
 	t.Cleanup(func() {
 		renamePath = original
+	})
+}
+
+func forceCopyPathErrorAfter(t *testing.T, successfulCopies int, err error) {
+	t.Helper()
+	original := copyPathOp
+	calls := 0
+	copyPathOp = func(src, dst string) error {
+		if calls >= successfulCopies {
+			return err
+		}
+		calls++
+		return original(src, dst)
+	}
+	t.Cleanup(func() {
+		copyPathOp = original
+	})
+}
+
+func forceRemovePathErrorAfter(t *testing.T, successfulRemoves int, err error) {
+	t.Helper()
+	original := removePath
+	calls := 0
+	removePath = func(path string) error {
+		if calls >= successfulRemoves {
+			return err
+		}
+		calls++
+		return original(path)
+	}
+	t.Cleanup(func() {
+		removePath = original
+	})
+}
+
+func forceSymlinkPathError(t *testing.T, err error) {
+	t.Helper()
+	original := symlinkPath
+	symlinkPath = func(oldname, newname string) error {
+		return err
+	}
+	t.Cleanup(func() {
+		symlinkPath = original
 	})
 }
