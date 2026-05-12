@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -41,10 +42,8 @@ func shellCompletionArgs(cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return usageError(cmd)
 	}
-	for _, shell := range supportedCompletionShells {
-		if args[0] == shell {
-			return nil
-		}
+	if slices.Contains(supportedCompletionShells, args[0]) {
+		return nil
 	}
 	return unsupportedCompletionShellError(args[0])
 }
@@ -139,6 +138,20 @@ func (a *app) completeCollections(
 		collections = append(collections, collection.Name)
 	}
 	return completeStrings(collections, selected, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func (a *app) completeStatusStates(
+	cmd *cobra.Command,
+	args []string,
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	selectedValues, _ := cmd.Flags().GetStringArray("state")
+	selected := selectedCompletions(selectedValues)
+	return completeStrings(
+		dotty.SupportedStatusFilterValues(),
+		selected,
+		toComplete,
+	), cobra.ShellCompDirectiveNoFileComp
 }
 
 func (a *app) completionInventory() (*dotty.Inventory, error) {

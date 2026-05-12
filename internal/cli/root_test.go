@@ -297,6 +297,10 @@ func TestRootDescriptionAndStatusVerboseHelpAreApproachable(t *testing.T) {
 	if !strings.Contains(usage, "status output") {
 		t.Fatalf("verbose help should clarify status scope, got %q", usage)
 	}
+	stateUsage := status.Flags().Lookup("state").Usage
+	if !strings.Contains(stateUsage, "status state") || !strings.Contains(stateUsage, "repeated") {
+		t.Fatalf("state help should clarify filtering scope, got %q", stateUsage)
+	}
 	completion, _, err := cmd.Find([]string{"completion"})
 	if err != nil {
 		t.Fatal(err)
@@ -304,6 +308,216 @@ func TestRootDescriptionAndStatusVerboseHelpAreApproachable(t *testing.T) {
 	if want := "completion <bash|zsh|fish|powershell>"; completion.Use != want {
 		t.Fatalf("completion usage mismatch: want %q, got %q", want, completion.Use)
 	}
+}
+
+func TestStatusStateFilter(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
+	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(repo, "zsh", ".zshrc"),
+		[]byte("export EDITOR=vim\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(repo, "zsh", ".zprofile"),
+		[]byte("export PATH\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "tmux"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "ghostty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(
+		filepath.Join(repo, "zsh", ".zshrc"),
+		filepath.Join(home, ".zshrc"),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, errOut, err := executeCommand("--repo", repo, "status", "--state", "nope"); err == nil {
+		t.Fatal("expected invalid state to fail")
+	} else if !strings.Contains(err.Error(), "unsupported status state \"nope\"") {
+		t.Fatalf("unexpected invalid-state error: %v\nstderr: %s", err, errOut)
+	}
+
+	t.Run("single-state", func(t *testing.T) {
+		out, errOut, err := executeCommand("--repo", repo, "status", "--state", "linked")
+		if err != nil {
+			t.Fatalf("status --state linked failed: %v\nstderr: %s", err, errOut)
+		}
+		want := fmt.Sprintf(
+			"Repository: ~/dotfiles\n\n%-24s %s\n\nSummary: 1 package: 1 linked\n",
+			"zsh",
+			"LINKED",
+		)
+		if out != want {
+			t.Fatalf("unexpected linked-only output\nwant:\n%s\ngot:\n%s", want, out)
+		}
+	})
+
+	t.Run("union", func(t *testing.T) {
+		out, errOut, err := executeCommand(
+			"--repo",
+			repo,
+			"status",
+			"--state",
+			"linked",
+			"--state",
+			"unlinked",
+		)
+		if err != nil {
+			t.Fatalf("status --state linked --state unlinked failed: %v\nstderr: %s", err, errOut)
+		}
+		want := fmt.Sprintf(
+			"Repository: ~/dotfiles\n\n%-24s %s\n%-24s %s\n\nSummary: 2 packages: 1 linked, 1 unlinked\n",
+			"tmux",
+			"UNLINKED",
+			"zsh",
+			"LINKED",
+		)
+		if out != want {
+			t.Fatalf("unexpected union output\nwant:\n%s\ngot:\n%s", want, out)
+		}
+	})
+
+	t.Run("untracked-only", func(t *testing.T) {
+		out, errOut, err := executeCommand("--repo", repo, "status", "--state", "untracked")
+		if err != nil {
+			t.Fatalf("status --state untracked failed: %v\nstderr: %s", err, errOut)
+		}
+		want := fmt.Sprintf(
+			"Repository: ~/dotfiles\n\n%s\n  %s\n  %s\n\nSummary: 0 packages; 2 untracked\n",
+			"UNTRACKED",
+			"ghostty",
+			"zsh/.zprofile",
+		)
+		if out != want {
+			t.Fatalf("unexpected untracked-only output\nwant:\n%s\ngot:\n%s", want, out)
+		}
+	})
+
+	t.Run("positional-package", func(t *testing.T) {
+		out, errOut, err := executeCommand("--repo", repo, "status", "zsh", "--state", "linked")
+		if err != nil {
+			t.Fatalf("status zsh --state linked failed: %v\nstderr: %s", err, errOut)
+		}
+		want := fmt.Sprintf(
+			"Repository: ~/dotfiles\n\n%-24s %s\n\nSummary: 1 package: 1 linked\n",
+			"zsh",
+			"LINKED",
+		)
+		if out != want {
+			t.Fatalf("unexpected positional-package output\nwant:\n%s\ngot:\n%s", want, out)
+		}
+	})
+
+	t.Run("verbose-filtered", func(t *testing.T) {
+		out, errOut, err := executeCommand(
+			"--repo",
+			repo,
+			"status",
+			"--verbose",
+			"--state",
+			"linked",
+		)
+		if err != nil {
+			t.Fatalf("status --verbose --state linked failed: %v\nstderr: %s", err, errOut)
+		}
+		want := fmt.Sprintf(
+			"Repository: ~/dotfiles\n\n%-18s %-20s %-36s %s\n\nSummary: 1 package: 1 linked\n",
+			"zsh",
+			".zshrc",
+			"~/.zshrc",
+			"LINKED",
+		)
+		if out != want {
+			t.Fatalf("unexpected verbose filtered output\nwant:\n%s\ngot:\n%s", want, out)
+		}
+	})
+
+	if out, errOut, err := executeCommand(
+		"--repo",
+		repo,
+		"status",
+		"--state",
+		"missing-source",
+	); err != nil {
+		t.Fatalf("status with missing-source failed: %v\nstderr: %s", err, errOut)
+	} else if out == "" {
+		t.Fatal("expected status output for accepted state")
+	}
+}
+
+func TestStatusStateCompletion(t *testing.T) {
+	_, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+
+	choices, errOut, err := executeCompletion("--repo", repo, "status", "--state", "")
+	if err != nil {
+		t.Fatalf("status state completion failed: %v\nstderr: %s", err, errOut)
+	}
+	requireChoices(
+		t,
+		choices,
+		[]string{
+			"linked",
+			"unlinked",
+			"partial",
+			"conflict",
+			"missing-source",
+			"empty",
+			"untracked",
+		},
+	)
+
+	choices, errOut, err = executeCompletion(
+		"--repo",
+		repo,
+		"status",
+		"--state",
+		"linked",
+		"--state",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("status repeated state completion failed: %v\nstderr: %s", err, errOut)
+	}
+	requireChoices(
+		t,
+		choices,
+		[]string{"unlinked", "partial", "conflict", "missing-source", "empty", "untracked"},
+	)
 }
 
 func TestHelpOutputUsesConsistentSections(t *testing.T) {
@@ -1148,7 +1362,7 @@ func executeCompletion(args ...string) (choices []string, stderr string, err err
 
 func completionChoices(output string) []string {
 	var choices []string
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		if line == "" || strings.HasPrefix(line, ":") ||
 			strings.HasPrefix(line, "Completion ended") {
 			continue

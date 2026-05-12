@@ -208,6 +208,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 
 func (a *app) statusCommand() *cobra.Command {
 	var verbose bool
+	var stateFilters []string
 	cmd := &cobra.Command{
 		Use:               "status [<package>...]",
 		Short:             "Show linked, unlinked, conflict, missing-source, empty, partial, and untracked states",
@@ -218,16 +219,28 @@ func (a *app) statusCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			parsedStates := make([]dotty.State, 0, len(stateFilters))
+			for _, stateValue := range stateFilters {
+				state, err := dotty.ParseStatusFilterValue(stateValue)
+				if err != nil {
+					return err
+				}
+				parsedStates = append(parsedStates, state)
+			}
 			report, err := svc.Status(args)
 			if err != nil {
 				return err
 			}
+			report = dotty.FilterStatusReport(report, parsedStates)
 			renderStatus(a.out, report, verbose)
 			return nil
 		},
 	}
 	cmd.Flags().
 		BoolVarP(&verbose, "verbose", "v", false, "show detailed status output per Link Mapping")
+	cmd.Flags().
+		StringArrayVar(&stateFilters, "state", nil, "filter by status state (can be repeated)")
+	mustRegisterFlagCompletion(cmd, "state", a.completeStatusStates)
 	return cmd
 }
 

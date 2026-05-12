@@ -20,6 +20,47 @@ const (
 	StatePartial       State = "PARTIAL"
 )
 
+var statusFilterValues = []struct {
+	value string
+	state State
+}{
+	{value: "linked", state: StateLinked},
+	{value: "unlinked", state: StateUnlinked},
+	{value: "partial", state: StatePartial},
+	{value: "conflict", state: StateConflict},
+	{value: "missing-source", state: StateMissingSource},
+	{value: "empty", state: StateEmpty},
+	{value: "untracked", state: StateUntracked},
+}
+
+var statusFilterValueByName = func() map[string]State {
+	values := make(map[string]State, len(statusFilterValues))
+	for _, item := range statusFilterValues {
+		values[item.value] = item.state
+	}
+	return values
+}()
+
+func SupportedStatusFilterValues() []string {
+	values := make([]string, 0, len(statusFilterValues))
+	for _, item := range statusFilterValues {
+		values = append(values, item.value)
+	}
+	return values
+}
+
+func ParseStatusFilterValue(value string) (State, error) {
+	state, ok := statusFilterValueByName[value]
+	if !ok {
+		return "", fmt.Errorf(
+			"unsupported status state %q (supported values: %s)",
+			value,
+			strings.Join(SupportedStatusFilterValues(), ", "),
+		)
+	}
+	return state, nil
+}
+
 type StatusReport struct {
 	RepoPath  string
 	Packages  []PackageStatus
@@ -84,6 +125,58 @@ func (s Service) Status(packageFilter []string) (*StatusReport, error) {
 	}
 	report.Untracked = untracked
 	return report, nil
+}
+
+func FilterStatusReport(report *StatusReport, selected []State) *StatusReport {
+	if report == nil {
+		return nil
+	}
+	filtered := &StatusReport{RepoPath: report.RepoPath}
+	if len(selected) == 0 {
+		filtered.Packages = clonePackageStatuses(report.Packages)
+		filtered.Untracked = cloneUntrackedItems(report.Untracked)
+		return filtered
+	}
+
+	selectedStates := make(map[State]bool, len(selected))
+	for _, state := range selected {
+		selectedStates[state] = true
+	}
+	for _, pkg := range report.Packages {
+		if selectedStates[pkg.State] {
+			filtered.Packages = append(filtered.Packages, clonePackageStatus(pkg))
+		}
+	}
+	if selectedStates[StateUntracked] {
+		filtered.Untracked = cloneUntrackedItems(report.Untracked)
+	}
+	return filtered
+}
+
+func clonePackageStatus(pkg PackageStatus) PackageStatus {
+	cloned := pkg
+	if pkg.Entries != nil {
+		cloned.Entries = append([]EntryStatus(nil), pkg.Entries...)
+	}
+	return cloned
+}
+
+func clonePackageStatuses(packages []PackageStatus) []PackageStatus {
+	if packages == nil {
+		return nil
+	}
+	cloned := make([]PackageStatus, 0, len(packages))
+	for _, pkg := range packages {
+		cloned = append(cloned, clonePackageStatus(pkg))
+	}
+	return cloned
+}
+
+func cloneUntrackedItems(items []UntrackedItem) []UntrackedItem {
+	if items == nil {
+		return nil
+	}
+	return append([]UntrackedItem(nil), items...)
 }
 
 func (s Service) entryStatus(packageName string, mapping LinkMapping) EntryStatus {

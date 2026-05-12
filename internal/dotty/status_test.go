@@ -3,8 +3,121 @@ package dotty
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
+
+func TestStatusStateFilter(t *testing.T) {
+	t.Run("supported values and parsing", func(t *testing.T) {
+		wantValues := []string{
+			"linked",
+			"unlinked",
+			"partial",
+			"conflict",
+			"missing-source",
+			"empty",
+			"untracked",
+		}
+		gotValues := SupportedStatusFilterValues()
+		if !reflect.DeepEqual(gotValues, wantValues) {
+			t.Fatalf("supported values mismatch: want %v, got %v", wantValues, gotValues)
+		}
+
+		cases := map[string]State{
+			"linked":         StateLinked,
+			"unlinked":       StateUnlinked,
+			"partial":        StatePartial,
+			"conflict":       StateConflict,
+			"missing-source": StateMissingSource,
+			"empty":          StateEmpty,
+			"untracked":      StateUntracked,
+		}
+		for input, want := range cases {
+			got, err := ParseStatusFilterValue(input)
+			requireNoError(t, err)
+			if got != want {
+				t.Fatalf("ParseStatusFilterValue(%q) = %s, want %s", input, got, want)
+			}
+		}
+
+		_, err := ParseStatusFilterValue("invalid")
+		requireErrorContains(
+			t,
+			err,
+			`unsupported status state "invalid" (supported values: linked, unlinked, partial, conflict, missing-source, empty, untracked)`,
+		)
+	})
+
+	t.Run("filters by aggregate package state and untracked selection", func(t *testing.T) {
+		original := &StatusReport{
+			RepoPath: "repo",
+			Packages: []PackageStatus{
+				{Name: "linked", State: StateLinked, Entries: []EntryStatus{{State: StateLinked}}},
+				{
+					Name:    "partial",
+					State:   StatePartial,
+					Entries: []EntryStatus{{State: StateLinked}, {State: StateConflict}},
+				},
+				{Name: "empty", State: StateEmpty, Entries: nil},
+			},
+			Untracked: []UntrackedItem{{Path: "ghostty", State: StateUntracked}},
+		}
+
+		filtered := FilterStatusReport(original, []State{StateLinked, StateUntracked})
+		if filtered == original {
+			t.Fatal("FilterStatusReport returned the original report pointer")
+		}
+		if !reflect.DeepEqual(filtered.RepoPath, original.RepoPath) {
+			t.Fatalf("repo path changed: want %q, got %q", original.RepoPath, filtered.RepoPath)
+		}
+		if len(filtered.Packages) != 1 || filtered.Packages[0].Name != "linked" ||
+			filtered.Packages[0].State != StateLinked {
+			t.Fatalf("unexpected filtered packages: %#v", filtered.Packages)
+		}
+		if len(filtered.Untracked) != 1 || filtered.Untracked[0].Path != "ghostty" {
+			t.Fatalf("unexpected filtered untracked: %#v", filtered.Untracked)
+		}
+		if len(original.Packages) != 3 || original.Packages[1].Name != "partial" ||
+			original.Untracked[0].Path != "ghostty" {
+			t.Fatalf("original report was mutated: %#v", original)
+		}
+	})
+
+	t.Run("empty selection returns copy without mutation", func(t *testing.T) {
+		original := &StatusReport{
+			RepoPath: "repo",
+			Packages: []PackageStatus{
+				{
+					Name:    "partial",
+					State:   StatePartial,
+					Entries: []EntryStatus{{State: StateLinked}},
+				},
+			},
+			Untracked: []UntrackedItem{{Path: "ghostty", State: StateUntracked}},
+		}
+
+		filtered := FilterStatusReport(original, nil)
+		if filtered == original {
+			t.Fatal("FilterStatusReport returned the original report pointer")
+		}
+		filtered.Packages[0].Name = "changed"
+		filtered.Packages[0].Entries[0].State = StateConflict
+		filtered.Untracked[0].Path = "changed"
+
+		if original.Packages[0].Name != "partial" {
+			t.Fatalf("package name mutated in original report: %#v", original.Packages[0])
+		}
+		if original.Packages[0].Entries[0].State != StateLinked {
+			t.Fatalf(
+				"package entries mutated in original report: %#v",
+				original.Packages[0].Entries,
+			)
+		}
+		if original.Untracked[0].Path != "ghostty" {
+			t.Fatalf("untracked items mutated in original report: %#v", original.Untracked)
+		}
+	})
+}
 
 func TestStatusReportsPackageStates(t *testing.T) {
 	home, env := setupHome(t)

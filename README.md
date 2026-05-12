@@ -76,7 +76,7 @@ dotty completion fish
 dotty completion powershell
 ```
 
-Completions resolve the same Dotfiles Repository as normal commands, then suggest Package names for `link`, `unlink`, and `status`, and Collection names for `--collection`. The `add` command keeps its Package argument freeform, so it does not suggest existing Packages.
+Completions resolve the same Dotfiles Repository as normal commands, then suggest Package names for `link`, `unlink`, and `status`, Collection names for `--collection`, and status values for `dotty status --state`. The `add` command keeps its Package argument freeform, so it does not suggest existing Packages.
 
 Example local installs:
 
@@ -134,6 +134,7 @@ dotty unlink --all
 dotty repo
 dotty list
 dotty status
+dotty status --state conflict
 dotty status --verbose
 ```
 
@@ -182,24 +183,26 @@ dotty unlink --collection terminal
 | `dotty add <path> <package>`                                     | Adopt an existing file, directory, or symlink target into a Package. | `--dry-run`                                     |
 | `dotty link <package>... \| --all \| --collection <collection>`   | Create Links for selected Packages.                                  | `--all`, `--collection`, `--force`, `--dry-run` |
 | `dotty unlink <package>... \| --all \| --collection <collection>` | Remove Links for selected Packages.                                  | `--all`, `--collection`, `--hard`, `--dry-run`  |
-| `dotty status [<package>...]`                                    | Show package state inferred from the Manifest and filesystem.        | `--verbose`, `-v`                               |
+| `dotty status [<package>...]`                                    | Show package state inferred from the Manifest and filesystem.        | `--state`, `--verbose`, `-v`                    |
 | `dotty list`                                                     | List Packages and Collections defined in the Manifest.               | None                                            |
 | `dotty repo`                                                     | Show the resolved Dotfiles Repository and config file path.           | None                                            |
 | `dotty completion <shell>`                                       | Generate shell completion scripts.                                   | `bash`, `zsh`, `fish`, `powershell`             |
 
 All commands accept the global `--repo` flag when they need to operate on a specific Dotfiles Repository.
 
-`dotty status` prints the resolved Dotfiles Repository, package states, untracked repository content, and a summary count. Use `dotty status --verbose` or `dotty status -v` for per-Link Mapping status; `-v` is scoped to `status`, while the version flag is `--version` or `dotty version`.
+`dotty status` prints the resolved Dotfiles Repository, package states, untracked repository content, and a summary count. Use `--state <state>` to keep aggregate Package rows and untracked rows that match a state. Repeat `--state` to include the union of several states, for example `dotty status --state conflict --state missing-source`. Supported values are `linked`, `unlinked`, `partial`, `conflict`, `missing-source`, `empty`, and `untracked`. Use `dotty status --verbose` or `dotty status -v` for per-Link Mapping status; verbose output shows details only for retained Packages. `-v` is scoped to `status`, while the version flag is `--version` or `dotty version`.
 
 ## Status States
 
-- `LINKED`: the Target Path is a symlink to the expected Package Source.
-- `UNLINKED`: the Package Source exists and the Target Path does not exist.
-- `CONFLICT`: the Target Path exists as non-symlink content or points to another source.
-- `MISSING SOURCE`: the Manifest references a Package Source that does not exist.
-- `EMPTY`: the Package has no Link Mappings.
-- `PARTIAL`: a multi-mapping Package has mixed linked/unlinked states.
-- `UNTRACKED`: repository content is not represented in the Manifest.
+Dotty renders status labels in uppercase, while `--state` accepts lowercase or kebab-case filter values:
+
+- `LINKED` (`--state linked`): the Target Path is a symlink to the expected Package Source.
+- `UNLINKED` (`--state unlinked`): the Package Source exists and the Target Path does not exist.
+- `PARTIAL` (`--state partial`): a Package has mixed Link Mapping states.
+- `CONFLICT` (`--state conflict`): the Target Path exists as non-symlink content or points to another source.
+- `MISSING SOURCE` (`--state missing-source`): the Manifest references a Package Source that does not exist.
+- `EMPTY` (`--state empty`): the Package has no Link Mappings.
+- `UNTRACKED` (`--state untracked`): untracked repository content is not represented in the Manifest.
 
 ## Repository Selection
 
