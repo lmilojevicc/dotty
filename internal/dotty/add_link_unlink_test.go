@@ -8,6 +8,14 @@ import (
 	"testing"
 )
 
+const manifestWithSingleZshrcLink = `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`
+
 func TestAddFileToNewAndExistingPackageUsesBasenameSource(t *testing.T) {
 	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
@@ -490,13 +498,7 @@ func TestAddRefusesSymlinkedPackageSourceEscapingRepository(t *testing.T) {
 }
 
 func TestLinkRefusesTargetConflictUnlessForced(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
 	writeTextFile(t, target, "local copy\n")
@@ -628,13 +630,7 @@ links = [
 }
 
 func TestLinkDryRunValidatesForceWithoutReplacingConflict(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
 	writeTextFile(t, target, "local copy\n")
@@ -666,13 +662,7 @@ links = [
 }
 
 func TestLinkRefusesWrongSymlinkUnlessForced(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
 	wrongSource := filepath.Join(home, "other-zshrc")
@@ -690,13 +680,7 @@ links = [
 }
 
 func TestLinkTreatsBrokenTargetSymlinkAsConflictUnlessForced(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
 	writeTextFile(t, source, "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
@@ -825,13 +809,7 @@ links = [
 }
 
 func TestLinkForceReportsMoveAsideFailureWithoutReplacingConflict(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
 	writeTextFile(t, target, "local copy\n")
@@ -844,13 +822,7 @@ links = [
 }
 
 func TestLinkForceReportsCleanupFailureAfterReplacement(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
 	writeTextFile(t, source, "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
@@ -919,13 +891,7 @@ links = [
 }
 
 func TestUnlinkHandlesAbsentTargetsAndHardUnlinkWithoutSource(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	svc := NewService(repo, env)
 
 	results, err := svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
@@ -943,13 +909,7 @@ links = [
 }
 
 func TestUnlinkDryRunLeavesSoftAndHardTargetsUnchanged(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
 	writeTextFile(t, source, "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
@@ -1037,13 +997,7 @@ links = [
 }
 
 func TestUnlinkRefusesConflictsAndWrongSymlinks(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
 	svc := NewService(repo, env)
 	target := filepath.Join(home, ".zshrc")
@@ -1063,13 +1017,7 @@ links = [
 }
 
 func TestSoftUnlinkCopiesSourceAndFailsWhenSourceIsMissing(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
 	writeTextFile(t, source, "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
@@ -1112,13 +1060,7 @@ links = [
 }
 
 func TestSoftUnlinkLeavesTargetCopyAsConflictForStatusAndPlainLink(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
 	writeTextFile(t, source, "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
@@ -1197,13 +1139,7 @@ func TestHardUnlinkWithMissingSourceOnlyRemovesExpectedLinks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+			home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 			source := filepath.Join(repo, "zsh", ".zshrc")
 			target := filepath.Join(home, ".zshrc")
 			tt.setup(t, home, source, target)
@@ -1228,13 +1164,7 @@ links = [
 }
 
 func TestSoftUnlinkRollsBackRemovedLinkWhenCopyFailsDuringExecution(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
 	writeTextFile(t, source, "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
@@ -1318,13 +1248,7 @@ links = [
 }
 
 func TestUnlinkReportsRollbackFailure(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
 	writeTextFile(t, source, "export EDITOR=vim\n")
 	target := filepath.Join(home, ".zshrc")
