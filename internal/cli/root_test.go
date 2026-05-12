@@ -2,9 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/lmilojevicc/dotty/internal/dotty"
 )
@@ -307,6 +310,262 @@ func TestRootDescriptionAndStatusVerboseHelpAreApproachable(t *testing.T) {
 	}
 	if want := "completion <bash|zsh|fish|powershell>"; completion.Use != want {
 		t.Fatalf("completion usage mismatch: want %q, got %q", want, completion.Use)
+	}
+}
+
+func TestCommandSurfaceInventory(t *testing.T) {
+	cmd := NewRootCommand(io.Discard, io.Discard)
+	if got, want := cmd.Use, "dotty"; got != want {
+		t.Fatalf("root use mismatch: want %q, got %q", want, got)
+	}
+	if got, want := cmd.Short, "Sync configuration files across machines using a manifest"; got != want {
+		t.Fatalf("root short mismatch: want %q, got %q", want, got)
+	}
+	if flag := cmd.PersistentFlags().Lookup("repo"); flag == nil {
+		t.Fatal("root missing --repo global flag")
+	} else if flag.Usage != "dotfiles repository path (overrides DOTTY_REPO and config)" {
+		t.Fatalf("unexpected --repo usage: %q", flag.Usage)
+	}
+
+	tests := []struct {
+		name  string
+		use   string
+		short string
+		flags []string
+	}{
+		{
+			name:  "init",
+			use:   "init [<path>]",
+			short: "Initialize a dotty repository and remember it as the default",
+		},
+		{
+			name:  "add",
+			use:   "add <path> <package>",
+			short: "Adopt an existing file, directory, or symlink target into a package",
+			flags: []string{"dry-run:"},
+		},
+		{
+			name:  "link",
+			use:   "link <package>... | --all | --collection <collection>",
+			short: "Create links for packages, all packages, or an explicit collection",
+			flags: []string{"all:", "collection:c", "dry-run:", "force:"},
+		},
+		{
+			name:  "unlink",
+			use:   "unlink <package>... | --all | --collection <collection>",
+			short: "Remove links for packages, all packages, or an explicit collection",
+			flags: []string{"all:", "collection:c", "dry-run:", "hard:"},
+		},
+		{
+			name:  "status",
+			use:   "status [<package>...]",
+			short: "Show linked, unlinked, conflict, missing-source, empty, partial, and untracked states",
+			flags: []string{"state:", "verbose:v"},
+		},
+		{
+			name:  "list",
+			use:   "list",
+			short: "List packages and collections defined in the manifest",
+		},
+		{
+			name:  "repo",
+			use:   "repo",
+			short: "Show the resolved dotfiles repository and config path",
+		},
+		{
+			name:  "completion",
+			use:   "completion <bash|zsh|fish|powershell>",
+			short: "Generate shell completion scripts",
+		},
+		{
+			name:  "version",
+			use:   "version",
+			short: "Print the version number",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			subcommand, _, err := cmd.Find([]string{tt.name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if subcommand.Use != tt.use {
+				t.Fatalf("%s use mismatch: want %q, got %q", tt.name, tt.use, subcommand.Use)
+			}
+			if subcommand.Short != tt.short {
+				t.Fatalf(
+					"%s short mismatch: want %q, got %q",
+					tt.name,
+					tt.short,
+					subcommand.Short,
+				)
+			}
+			got := flagSpecs(subcommand.Flags())
+			if strings.Join(got, "\n") != strings.Join(tt.flags, "\n") {
+				t.Fatalf("%s flags mismatch\nwant: %#v\ngot:  %#v", tt.name, tt.flags, got)
+			}
+		})
+	}
+}
+
+func TestHelpVersionAndCompletionAreRepositoryIndependent(t *testing.T) {
+	setupCLIHomeOnly(t)
+	previousVersion := Version
+	Version = "v9.8.7"
+	t.Cleanup(func() { Version = previousVersion })
+
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "root help",
+			args: []string{"--help"},
+			want: []string{
+				"Usage:\n  dotty [command]\n",
+				"init",
+				"add",
+				"link",
+				"unlink",
+				"status",
+				"list",
+				"repo",
+				"completion",
+				"version",
+				"Global options:\n      --repo string",
+			},
+		},
+		{
+			name: "add help",
+			args: []string{"add", "--help"},
+			want: []string{
+				"Usage:\n  dotty add <path> <package> [flags]\n",
+				"Options:\n      --dry-run",
+				"Global options:\n      --repo string",
+			},
+		},
+		{
+			name: "link help",
+			args: []string{"link", "--help"},
+			want: []string{
+				"Usage:\n  dotty link <package>... | --all | --collection <collection> [flags]\n",
+				"Options:\n      --all",
+				"  -c, --collection stringArray",
+				"      --force",
+				"      --dry-run",
+				"Global options:\n      --repo string",
+			},
+		},
+		{
+			name: "unlink help",
+			args: []string{"unlink", "--help"},
+			want: []string{
+				"Usage:\n  dotty unlink <package>... | --all | --collection <collection> [flags]\n",
+				"Options:\n      --all",
+				"  -c, --collection stringArray",
+				"      --hard",
+				"      --dry-run",
+				"Global options:\n      --repo string",
+			},
+		},
+		{
+			name: "status help",
+			args: []string{"status", "--help"},
+			want: []string{
+				"Usage:\n  dotty status [<package>...] [flags]\n",
+				"--state stringArray   filter by status state (can be repeated)",
+				"  -v, --verbose",
+				"Global options:\n      --repo string",
+			},
+		},
+		{
+			name: "list help",
+			args: []string{"list", "--help"},
+			want: []string{
+				"Usage:\n  dotty list [flags]\n",
+				"Global options:\n      --repo string",
+			},
+		},
+		{
+			name: "repo help",
+			args: []string{"repo", "--help"},
+			want: []string{
+				"Usage:\n  dotty repo [flags]\n",
+				"Global options:\n      --repo string",
+			},
+		},
+		{
+			name: "completion help",
+			args: []string{"completion", "--help"},
+			want: []string{
+				"Usage:\n  dotty completion <bash|zsh|fish|powershell> [flags]\n",
+				"Global options:\n      --repo string",
+			},
+		},
+		{
+			name: "version help",
+			args: []string{"version", "--help"},
+			want: []string{"Usage:\n  dotty version [flags]\n"},
+		},
+		{
+			name: "root version flag",
+			args: []string{"--version"},
+			want: []string{"dotty version v9.8.7\n"},
+		},
+		{
+			name: "version command",
+			args: []string{"version"},
+			want: []string{"dotty version v9.8.7\n"},
+		},
+		{
+			name: "bash completion",
+			args: []string{"completion", "bash"},
+			want: []string{"__start_dotty"},
+		},
+		{
+			name: "zsh completion",
+			args: []string{"completion", "zsh"},
+			want: []string{"#compdef dotty"},
+		},
+		{
+			name: "fish completion",
+			args: []string{"completion", "fish"},
+			want: []string{"complete -c dotty"},
+		},
+		{
+			name: "powershell completion",
+			args: []string{"completion", "powershell"},
+			want: []string{"Register-ArgumentCompleter"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, err := executeCommand(tt.args...)
+			if err != nil {
+				t.Fatalf("%v failed: %v\nstderr: %s", tt.args, err, stderr)
+			}
+			if stderr != "" {
+				t.Fatalf("expected empty stderr, got %q", stderr)
+			}
+			for _, want := range tt.want {
+				requireOutputContains(t, stdout, want)
+			}
+			for _, unwanted := range []string{
+				"dotty repository is not configured",
+				"manifest not found",
+			} {
+				if strings.Contains(stdout, unwanted) {
+					t.Fatalf(
+						"repository-independent output should not contain %q:\n%s",
+						unwanted,
+						stdout,
+					)
+				}
+			}
+		})
 	}
 }
 
@@ -1251,6 +1510,329 @@ packages = ["zsh"]
 	}
 }
 
+func TestCommandArgumentDiagnosticsCoverInvalidShapes(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "init too many args",
+			args: []string{"init", "one", "two"},
+			want: "usage: dotty init [<path>]",
+		},
+		{
+			name: "add missing args",
+			args: []string{"add"},
+			want: "usage: dotty add <path> <package>",
+		},
+		{
+			name: "link missing selector",
+			args: []string{"link"},
+			want: "usage: dotty link <package>... | --all | --collection <collection>",
+		},
+		{
+			name: "unlink missing selector",
+			args: []string{"unlink"},
+			want: "usage: dotty unlink <package>... | --all | --collection <collection>",
+		},
+		{name: "list too many args", args: []string{"list", "extra"}, want: "usage: dotty list"},
+		{name: "repo too many args", args: []string{"repo", "extra"}, want: "usage: dotty repo"},
+		{
+			name: "completion missing shell",
+			args: []string{"completion"},
+			want: "usage: dotty completion <bash|zsh|fish|powershell>",
+		},
+		{
+			name: "completion too many args",
+			args: []string{"completion", "bash", "extra"},
+			want: "usage: dotty completion <bash|zsh|fish|powershell>",
+		},
+		{
+			name: "version too many args",
+			args: []string{"version", "extra"},
+			want: "usage: dotty version",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, rendered, err := executeCommandRenderedError(t, tt.args...)
+			if err == nil {
+				t.Fatal("expected argument error")
+			}
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			want := "error: invalid arguments\n  " + tt.want + "\n"
+			if rendered != want {
+				t.Fatalf("unexpected rendered diagnostic\nwant: %q\ngot:  %q", want, rendered)
+			}
+		})
+	}
+}
+
+func TestCommandDiagnosticsCoverUnknownCommandFlagAndUnsupportedShell(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "unknown command",
+			args: []string{"bogus"},
+			want: "error: unknown command \"bogus\" for \"dotty\"\n",
+		},
+		{
+			name: "unknown flag",
+			args: []string{"status", "--bogus"},
+			want: "error: unknown flag: --bogus\n",
+		},
+		{
+			name: "unsupported completion shell",
+			args: []string{"completion", "tcsh"},
+			want: "error: unsupported shell \"tcsh\"\n" +
+				"hint: use bash, zsh, fish, or powershell\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, rendered, err := executeCommandRenderedError(t, tt.args...)
+			if err == nil {
+				t.Fatal("expected command error")
+			}
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if rendered != tt.want {
+				t.Fatalf("unexpected rendered diagnostic\nwant: %q\ngot:  %q", tt.want, rendered)
+			}
+		})
+	}
+}
+
+func TestRuntimeDiagnosticsRenderWithoutUsage(t *testing.T) {
+	t.Run("repository not configured", func(t *testing.T) {
+		setupCLIHomeOnly(t)
+		stdout, rendered, err := executeCommandRenderedError(t, "list")
+		if err == nil {
+			t.Fatal("expected repository resolution error")
+		}
+		if stdout != "" {
+			t.Fatalf("expected empty stdout, got %q", stdout)
+		}
+		want := "error: dotty repository is not configured\n" +
+			"hint: run `dotty init <path>` or pass --repo\n"
+		if rendered != want {
+			t.Fatalf("unexpected rendered diagnostic\nwant: %q\ngot:  %q", want, rendered)
+		}
+		requireNoUsageDiagnostic(t, rendered)
+	})
+
+	t.Run("manifest missing", func(t *testing.T) {
+		home := setupCLIHomeOnly(t)
+		repo := filepath.Join(home, "missing-manifest")
+		if err := os.MkdirAll(repo, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		stdout, rendered, err := executeCommandRenderedError(t, "--repo", repo, "list")
+		if err == nil {
+			t.Fatal("expected missing Manifest error")
+		}
+		if stdout != "" {
+			t.Fatalf("expected empty stdout, got %q", stdout)
+		}
+		want := fmt.Sprintf(
+			"error: manifest not found at %s\nhint: run `dotty init %s`\n",
+			filepath.Join(repo, dotty.ManifestFileName),
+			repo,
+		)
+		if rendered != want {
+			t.Fatalf("unexpected rendered diagnostic\nwant: %q\ngot:  %q", want, rendered)
+		}
+		requireNoUsageDiagnostic(t, rendered)
+	})
+
+	t.Run("selection and runtime failures", func(t *testing.T) {
+		home, repo := setupCLITest(t)
+		manifest := `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[collections.terminal]
+packages = ["zsh"]
+`
+		writeManifest(t, repo, manifest)
+		if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(
+			filepath.Join(repo, "zsh", ".zshrc"),
+			[]byte("export EDITOR=vim\n"),
+			0o644,
+		); err != nil {
+			t.Fatal(err)
+		}
+		conflictTarget := filepath.Join(home, ".zshrc")
+		if err := os.WriteFile(conflictTarget, []byte("local copy\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		manifestBefore, err := os.ReadFile(dotty.ManifestPath(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		tests := []struct {
+			name string
+			args []string
+			want string
+		}{
+			{
+				name: "unknown package",
+				args: []string{"--repo", repo, "link", "ghostty"},
+				want: "error: unknown package \"ghostty\"\n" +
+					"hint: run `dotty list` to see packages\n",
+			},
+			{
+				name: "unknown collection",
+				args: []string{"--repo", repo, "link", "--collection", "desktop"},
+				want: "error: unknown collection \"desktop\"\n" +
+					"hint: run `dotty list` to see collections\n",
+			},
+			{
+				name: "invalid status state",
+				args: []string{"--repo", repo, "status", "--state", "nope"},
+				want: "error: unsupported status state \"nope\" (supported values: linked, unlinked, partial, conflict, missing-source, empty, untracked)\n",
+			},
+			{
+				name: "target conflict",
+				args: []string{"--repo", repo, "link", "zsh"},
+				want: fmt.Sprintf(
+					"error: target %s already exists\nhint: use --force to move it aside and create the Link\n",
+					conflictTarget,
+				),
+			},
+			{
+				name: "missing source",
+				args: []string{"--repo", repo, "link", "tmux"},
+				want: "error: package \"tmux\" source \".\" is missing\n" +
+					"hint: restore the Package Source or remove the Link Mapping from dotty.toml\n",
+			},
+			{
+				name: "missing add target",
+				args: []string{"--repo", repo, "add", filepath.Join(home, ".missing"), "ghostty"},
+				want: fmt.Sprintf(
+					"error: target %s does not exist\nhint: choose an existing Target Path\n",
+					filepath.Join(home, ".missing"),
+				),
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				stdout, rendered, err := executeCommandRenderedError(t, tt.args...)
+				if err == nil {
+					t.Fatal("expected runtime diagnostic")
+				}
+				if stdout != "" {
+					t.Fatalf("expected empty stdout, got %q", stdout)
+				}
+				if rendered != tt.want {
+					t.Fatalf(
+						"unexpected rendered diagnostic\nwant: %q\ngot:  %q",
+						tt.want,
+						rendered,
+					)
+				}
+				requireNoUsageDiagnostic(t, rendered)
+			})
+		}
+
+		manifestAfter, err := os.ReadFile(dotty.ManifestPath(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(manifestAfter) != string(manifestBefore) {
+			t.Fatalf(
+				"diagnostic paths changed Manifest\nbefore: %q\nafter:  %q",
+				string(manifestBefore),
+				string(manifestAfter),
+			)
+		}
+		if data, err := os.ReadFile(conflictTarget); err != nil || string(data) != "local copy\n" {
+			t.Fatalf("target conflict changed: data=%q err=%v", string(data), err)
+		}
+	})
+}
+
+func TestBuiltBinaryWiresMainHelpVersionAndErrors(t *testing.T) {
+	binary := buildDottyBinaryForTest(t)
+
+	tests := []struct {
+		name       string
+		args       []string
+		wantCode   int
+		wantStdout string
+		wantStderr string
+	}{
+		{
+			name:       "help",
+			args:       []string{"--help"},
+			wantStdout: "Usage:\n  dotty [command]\n",
+		},
+		{
+			name:       "version flag",
+			args:       []string{"--version"},
+			wantStdout: "dotty version ",
+		},
+		{
+			name:     "runtime error",
+			args:     []string{"list"},
+			wantCode: 1,
+			wantStderr: "error: dotty repository is not configured\n" +
+				"hint: run `dotty init <path>` or pass --repo\n",
+		},
+		{
+			name:     "argument shape error",
+			args:     []string{"add"},
+			wantCode: 1,
+			wantStderr: "error: invalid arguments\n" +
+				"  usage: dotty add <path> <package>\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, code := runDottyBinary(t, binary, tt.args...)
+			if code != tt.wantCode {
+				t.Fatalf(
+					"exit code mismatch: want %d, got %d\nstderr: %s",
+					tt.wantCode,
+					code,
+					stderr,
+				)
+			}
+			if tt.wantStdout != "" {
+				requireOutputContains(t, stdout, tt.wantStdout)
+			} else if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if stderr != tt.wantStderr {
+				t.Fatalf("stderr mismatch\nwant: %q\ngot:  %q", tt.wantStderr, stderr)
+			}
+		})
+	}
+}
+
 func TestCommandArgumentErrorsIncludeSampleUsage(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1349,6 +1931,23 @@ func executeCommandRaw(args ...string) (stdout string, stderr string, err error)
 	return out.String(), errOut.String(), err
 }
 
+func executeCommandRenderedError(
+	t *testing.T,
+	args ...string,
+) (stdout string, rendered string, err error) {
+	t.Helper()
+	stdout, stderr, err := executeCommand(args...)
+	if stderr != "" {
+		t.Fatalf("expected command execution to leave stderr rendering to caller, got %q", stderr)
+	}
+	if err == nil {
+		return stdout, "", nil
+	}
+	var errOut bytes.Buffer
+	RenderError(&errOut, err)
+	return stdout, stripANSI(errOut.String()), err
+}
+
 func executeCompletion(args ...string) (choices []string, stderr string, err error) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
@@ -1378,6 +1977,80 @@ func requireChoices(t *testing.T, got []string, want []string) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected completions\nwant: %#v\ngot:  %#v", want, got)
 	}
+}
+
+func requireNoUsageDiagnostic(t *testing.T, rendered string) {
+	t.Helper()
+	if strings.Contains(rendered, "usage: dotty") || strings.Contains(rendered, "Usage:") {
+		t.Fatalf("runtime diagnostic should not include usage, got %q", rendered)
+	}
+}
+
+func flagSpecs(flags *pflag.FlagSet) []string {
+	specs := []string{}
+	flags.VisitAll(func(flag *pflag.Flag) {
+		specs = append(specs, flag.Name+":"+flag.Shorthand)
+	})
+	return specs
+}
+
+func buildDottyBinaryForTest(t *testing.T) string {
+	t.Helper()
+	root := repoRoot(t)
+	binary := filepath.Join(t.TempDir(), "dotty")
+	cmd := exec.Command("go", "build", "-o", binary, "./cmd/dotty")
+	cmd.Dir = root
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build dotty binary: %v\n%s", err, string(output))
+	}
+	return binary
+}
+
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("could not find repository root")
+		}
+		dir = parent
+	}
+}
+
+func runDottyBinary(
+	t *testing.T,
+	binary string,
+	args ...string,
+) (stdout string, stderr string, code int) {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), "home")
+	xdgConfig := filepath.Join(home, ".config")
+	if err := os.MkdirAll(xdgConfig, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(binary, args...)
+	cmd.Env = append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+xdgConfig, "DOTTY_REPO=")
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+	err := cmd.Run()
+	code = 0
+	if err != nil {
+		var exitError *exec.ExitError
+		if !errors.As(err, &exitError) {
+			t.Fatalf("run dotty binary: %v", err)
+		}
+		code = exitError.ExitCode()
+	}
+	return stripANSI(out.String()), stripANSI(errOut.String()), code
 }
 
 func writeManifest(t *testing.T, repo string, content string) {
