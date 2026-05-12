@@ -730,14 +730,33 @@ links = [
 	rel, err := filepath.Rel(filepath.Dir(target), source)
 	requireNoError(t, err)
 	requireNoError(t, os.Symlink(rel, target))
+	assertSymlink(t, target, rel)
 
-	_, err = NewService(repo, env).Link(LinkOptions{Packages: []string{"tmux"}})
+	svc := NewService(repo, env)
+	report, err := svc.Status([]string{"tmux"})
+	requireNoError(t, err)
+	if len(report.Packages) != 1 || report.Packages[0].State != StateLinked {
+		t.Fatalf(
+			"relative expected symlink should be reported LINKED before normalization, got %#v",
+			report.Packages,
+		)
+	}
+	if len(report.Packages[0].Entries) != 1 || report.Packages[0].Entries[0].State != StateLinked {
+		t.Fatalf(
+			"relative expected symlink entry should be reported LINKED before normalization, got %#v",
+			report.Packages[0].Entries,
+		)
+	}
+
+	_, err = svc.Link(LinkOptions{Packages: []string{"tmux"}})
 	requireNoError(t, err)
 	assertSymlink(t, target, source)
+	assertTmuxPackageState(t, svc, StateLinked)
 
-	_, err = NewService(repo, env).Link(LinkOptions{Packages: []string{"tmux"}})
+	_, err = svc.Link(LinkOptions{Packages: []string{"tmux"}})
 	requireNoError(t, err)
 	assertSymlink(t, target, source)
+	assertTmuxPackageState(t, svc, StateLinked)
 }
 
 func TestLinkForceReplacesOnlySelectedPackageConflicts(t *testing.T) {
@@ -822,6 +841,27 @@ links = [
 	requireErrorContains(t, err, "move "+target+" aside")
 	requireFileContent(t, target, "local copy\n")
 	requireNoDottyBackups(t, home)
+}
+
+func TestLinkForceReportsCleanupFailureAfterReplacement(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	writeTextFile(t, source, "export EDITOR=vim\n")
+	target := filepath.Join(home, ".zshrc")
+	writeTextFile(t, target, "local copy\n")
+	forceRemoveAllPathError(t, errors.New("cleanup backup failed"))
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"zsh"}, Force: true})
+	requireErrorContains(t, err, "cleanup backup failed")
+	assertSymlink(t, target, source)
+	requireFileContent(t, source, "export EDITOR=vim\n")
+	requireDottyBackupContent(t, home, "local copy\n")
 }
 
 func TestLinkForceRollsBackEarlierReplacementWhenLaterMappingFailsDuringExecution(t *testing.T) {

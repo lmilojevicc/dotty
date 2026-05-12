@@ -95,7 +95,7 @@ func repositoryLockKey(repo string) string {
 	return filepath.Clean(repo)
 }
 
-func flock(file *os.File, how int) error {
+var flock = func(file *os.File, how int) error {
 	for {
 		err := syscall.Flock(int(file.Fd()), how)
 		if err != syscall.EINTR {

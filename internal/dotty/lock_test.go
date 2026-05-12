@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -117,7 +118,6 @@ func TestWithRepositoryLockUsesFlockAcrossProcesses(t *testing.T) {
 	repo := filepath.Join(root, "dotfiles")
 	requireNoError(t, os.MkdirAll(repo, 0o755))
 	attemptingPath := filepath.Join(root, "child-attempting")
-	releasePath := filepath.Join(root, "child-release")
 	enteredPath := filepath.Join(root, "child-entered")
 
 	executable, err := os.Executable()
@@ -132,7 +132,6 @@ func TestWithRepositoryLockUsesFlockAcrossProcesses(t *testing.T) {
 		"DOTTY_LOCK_TEST_CHILD=1",
 		"DOTTY_LOCK_TEST_REPO="+repo,
 		"DOTTY_LOCK_TEST_ATTEMPTING="+attemptingPath,
-		"DOTTY_LOCK_TEST_RELEASE="+releasePath,
 		"DOTTY_LOCK_TEST_ENTERED="+enteredPath,
 	)
 	cmd.Stdout = &childOutput
@@ -151,7 +150,6 @@ func TestWithRepositoryLockUsesFlockAcrossProcesses(t *testing.T) {
 		if err := waitForPath(attemptingPath, time.Second); err != nil {
 			return err
 		}
-		writeTextFile(t, releasePath, "release\n")
 		if err := waitForPath(enteredPath, 150*time.Millisecond); err == nil {
 			return fmt.Errorf("child process entered repository lock while parent held flock")
 		}
@@ -181,14 +179,20 @@ func runRepositoryLockChild(t *testing.T) {
 	t.Helper()
 	repo := os.Getenv("DOTTY_LOCK_TEST_REPO")
 	attemptingPath := os.Getenv("DOTTY_LOCK_TEST_ATTEMPTING")
-	releasePath := os.Getenv("DOTTY_LOCK_TEST_RELEASE")
 	enteredPath := os.Getenv("DOTTY_LOCK_TEST_ENTERED")
-	if repo == "" || attemptingPath == "" || releasePath == "" || enteredPath == "" {
+	if repo == "" || attemptingPath == "" || enteredPath == "" {
 		t.Fatal("missing child repository lock test environment")
 	}
 
-	writeTextFile(t, attemptingPath, "attempting\n")
-	requireNoError(t, waitForPath(releasePath, 5*time.Second))
+	originalFlock := flock
+	signaledAttempt := false
+	flock = func(file *os.File, how int) error {
+		if how == syscall.LOCK_EX && !signaledAttempt {
+			signaledAttempt = true
+			writeTextFile(t, attemptingPath, "attempting\n")
+		}
+		return originalFlock(file, how)
+	}
 	requireNoError(t, withRepositoryLock(repo, func() error {
 		return os.WriteFile(enteredPath, []byte("entered\n"), 0o644)
 	}))

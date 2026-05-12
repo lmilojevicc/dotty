@@ -9,10 +9,11 @@ import (
 )
 
 var (
-	renamePath  = os.Rename
-	removePath  = os.Remove
-	symlinkPath = os.Symlink
-	copyPathOp  = copyPath
+	renamePath    = os.Rename
+	removePath    = os.Remove
+	removeAllPath = os.RemoveAll
+	symlinkPath   = os.Symlink
+	copyPathOp    = copyPath
 )
 
 func EnsureDirTx(tx *Tx, dir string, perm os.FileMode) error {
@@ -169,7 +170,7 @@ func MoveAsideTx(tx *Tx, path string) error {
 		return restoreMovedPathWithFallback(backup, path)
 	})
 	tx.AddCleanup(func() error {
-		return os.RemoveAll(backup)
+		return removeAllPath(backup)
 	})
 	return nil
 }

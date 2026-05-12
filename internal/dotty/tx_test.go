@@ -256,6 +256,19 @@ func requireDottyBackup(t *testing.T, dir string) {
 	t.Fatalf("expected a .dotty-backup-* path in %s", dir)
 }
 
+func requireDottyBackupContent(t *testing.T, dir, want string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	requireNoError(t, err)
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".dotty-backup-") {
+			requireFileContent(t, filepath.Join(dir, entry.Name()), want)
+			return
+		}
+	}
+	t.Fatalf("expected a .dotty-backup-* path in %s", dir)
+}
+
 func forceRenameError(t *testing.T, errno syscall.Errno) {
 	t.Helper()
 	original := renamePath
@@ -296,6 +309,17 @@ func forceRemovePathErrorAfter(t *testing.T, successfulRemoves int, err error) {
 	}
 	t.Cleanup(func() {
 		removePath = original
+	})
+}
+
+func forceRemoveAllPathError(t *testing.T, err error) {
+	t.Helper()
+	original := removeAllPath
+	removeAllPath = func(path string) error {
+		return err
+	}
+	t.Cleanup(func() {
+		removeAllPath = original
 	})
 }
 
