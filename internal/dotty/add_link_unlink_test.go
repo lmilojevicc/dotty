@@ -340,6 +340,28 @@ func TestAddRejectsDangerousTargetPathsWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestAddRejectsSymlinkedTargetParentInsideRepositoryWithoutMutation(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	_, err := InitRepo(repo, env)
+	requireNoError(t, err)
+	protectedContent := filepath.Join(repo, "loose")
+	writeTextFile(t, protectedContent, "protected repository content\n")
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	targetParent := filepath.Join(home, ".config", "repo-alias")
+	requireNoError(t, os.Symlink(repo, targetParent))
+	target := filepath.Join(targetParent, "loose")
+
+	_, err = NewService(repo, env).Add(target, "pkg")
+	requireErrorContains(t, err, "dangerous Target Path")
+	requireFileContent(t, protectedContent, "protected repository content\n")
+	assertSymlink(t, targetParent, repo)
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+	requireNoPath(t, filepath.Join(repo, "pkg"))
+}
+
 func TestAddDryRunValidatesAndDoesNotMoveLinkOrWriteManifest(t *testing.T) {
 	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
@@ -549,6 +571,35 @@ func TestLinkRejectsDangerousTargetPathsEvenWhenForced(t *testing.T) {
 			tt.assertSafe(t, home, repo, target)
 		})
 	}
+}
+
+func TestLinkRejectsSymlinkedTargetParentInsideRepositoryEvenWhenForced(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "pkg"), 0o755))
+	writeTextFile(t, filepath.Join(repo, "pkg", "config"), "enabled = true\n")
+	targetParent := filepath.Join(home, ".config", "repo-alias")
+	requireNoError(t, os.Symlink(repo, targetParent))
+	target := filepath.Join(targetParent, "target")
+	writeDottyManifest(t, repo, dangerousTargetManifest(target))
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"pkg"}, Force: true})
+	requireErrorContains(t, err, "dangerous Target Path")
+	assertSymlink(t, targetParent, repo)
+	requireNoPath(t, filepath.Join(repo, "target"))
+	requireFileContent(t, ManifestPath(repo), dangerousTargetManifest(target))
+}
+
+func TestLinkAllowsTargetWithRepositorySiblingPrefix(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	target := filepath.Join(home, "dotfiles-sibling", "tmux")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "pkg"), 0o755))
+	writeDottyManifest(t, repo, dangerousTargetManifest(target))
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"pkg"}})
+	requireNoError(t, err)
+	assertSymlink(t, target, filepath.Join(repo, "pkg"))
 }
 
 func TestLinkValidatesOnlySelectedPackageTargets(t *testing.T) {
