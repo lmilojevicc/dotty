@@ -514,6 +514,15 @@ func TestHelpVersionAndCompletionAreRepositoryIndependent(t *testing.T) {
 			},
 		},
 		{
+			name: "init help",
+			args: []string{"init", "--help"},
+			want: []string{
+				"Usage:\n  dotty init [<path>] [flags]\n",
+				"Initialize a dotty repository and remember it as the default",
+				"Global options:\n      --repo string",
+			},
+		},
+		{
 			name: "add help",
 			args: []string{"add", "--help"},
 			want: []string{
@@ -1680,6 +1689,50 @@ packages = ["tmux", "zsh"]
 	requireOutputContains(t, out, "linked zsh")
 	assertSymlink(t, filepath.Join(home, ".config", "tmux"), filepath.Join(repo, "tmux"))
 	assertSymlink(t, filepath.Join(home, ".zshrc"), filepath.Join(repo, "zsh", ".zshrc"))
+}
+
+func TestLinkPackageAndCollectionSelectorsDeduplicateInOrder(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[collections.terminal]
+packages = ["tmux", "zsh"]
+`)
+	if err := os.MkdirAll(filepath.Join(repo, "tmux"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(repo, "zsh", ".zshrc"),
+		[]byte("export EDITOR=vim\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, err := executeCommand("--repo", repo, "link", "zsh", "--collection", "terminal")
+	if err != nil {
+		t.Fatalf("link package plus collection failed: %v\nstderr: %s", err, errOut)
+	}
+	want := "linked zsh: ~/.zshrc -> ~/dotfiles/zsh/.zshrc\n" +
+		"linked tmux: ~/.config/tmux -> ~/dotfiles/tmux\n"
+	if out != want {
+		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
+	}
+	assertSymlink(t, filepath.Join(home, ".zshrc"), filepath.Join(repo, "zsh", ".zshrc"))
+	assertSymlink(t, filepath.Join(home, ".config", "tmux"), filepath.Join(repo, "tmux"))
 }
 
 func TestLinkAllPrintsAndCreatesLinks(t *testing.T) {
