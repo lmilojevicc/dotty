@@ -41,6 +41,7 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 	cmd.AddCommand(app.versionCommand())
 	cmd.AddCommand(app.initCommand())
 	cmd.AddCommand(app.addCommand())
+	cmd.AddCommand(app.mapCommand())
 	cmd.AddCommand(app.linkCommand())
 	cmd.AddCommand(app.unlinkCommand())
 	cmd.AddCommand(app.statusCommand())
@@ -118,6 +119,37 @@ func (a *app) addCommand() *cobra.Command {
 				return err
 			}
 			renderAddResult(a.out, result)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
+	return cmd
+}
+
+func (a *app) mapCommand() *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:               "map <package> <source> <target>",
+		Short:             "Add a Manifest Link Mapping without changing files",
+		Args:              exactArgs(3),
+		ValidArgsFunction: a.completeMapArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			svc, err := a.service()
+			if err != nil {
+				return err
+			}
+			result, err := svc.Map(
+				dotty.MapOptions{
+					Package: args[0],
+					Source:  args[1],
+					Target:  args[2],
+					DryRun:  dryRun,
+				},
+			)
+			if err != nil {
+				return err
+			}
+			renderMapResult(a.out, result)
 			return nil
 		},
 	}

@@ -33,6 +33,17 @@ type Service struct {
 	Env  Env
 }
 
+const (
+	LinkResultActionCreate          = "create"
+	LinkResultActionNoop            = "noop"
+	LinkResultActionNormalize       = "normalize"
+	LinkResultActionReplaceConflict = "replace-conflict"
+
+	UnlinkResultActionCopySource = "copy-source"
+	UnlinkResultActionRemoveLink = "remove-link"
+	UnlinkResultActionNoop       = "noop"
+)
+
 func NewService(repo string, env Env) Service {
 	return Service{Repo: repo, Env: env}
 }

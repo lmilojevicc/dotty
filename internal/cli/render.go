@@ -48,7 +48,7 @@ func renderLinkResults(out io.Writer, results []dotty.LinkResult) {
 	for _, result := range results {
 		verb := "linked"
 		if result.DryRun {
-			verb = "would link"
+			verb = linkDryRunVerb(result.Action)
 		}
 		fmt.Fprintf(
 			out,
@@ -61,6 +61,21 @@ func renderLinkResults(out io.Writer, results []dotty.LinkResult) {
 	}
 }
 
+func linkDryRunVerb(action string) string {
+	switch action {
+	case dotty.LinkResultActionCreate:
+		return "would create link"
+	case dotty.LinkResultActionNoop:
+		return "already linked"
+	case dotty.LinkResultActionNormalize:
+		return "would normalize link"
+	case dotty.LinkResultActionReplaceConflict:
+		return "would replace conflict"
+	default:
+		return "would link"
+	}
+}
+
 func renderUnlinkResults(out io.Writer, results []dotty.UnlinkResult) {
 	for _, result := range results {
 		verb := "unlinked"
@@ -70,10 +85,7 @@ func renderUnlinkResults(out io.Writer, results []dotty.UnlinkResult) {
 			note = "link removed"
 		}
 		if result.DryRun {
-			verb = "would unlink"
-			if result.Hard {
-				verb = "would hard-unlink"
-			}
+			verb, note = unlinkDryRunVerbAndNote(result.Action, result.Hard)
 		}
 		fmt.Fprintf(
 			out,
@@ -84,6 +96,37 @@ func renderUnlinkResults(out io.Writer, results []dotty.UnlinkResult) {
 			mutedStyle.Render(note),
 		)
 	}
+}
+
+func unlinkDryRunVerbAndNote(action string, hard bool) (string, string) {
+	switch action {
+	case dotty.UnlinkResultActionCopySource:
+		return "would copy Package Source", "soft Unlink"
+	case dotty.UnlinkResultActionRemoveLink:
+		return "would remove link", "Hard Unlink"
+	case dotty.UnlinkResultActionNoop:
+		return "already absent", "no-op"
+	default:
+		if hard {
+			return "would hard-unlink", "link removed"
+		}
+		return "would unlink", "copy left"
+	}
+}
+
+func renderMapResult(out io.Writer, result *dotty.MapResult) {
+	verb := "mapped"
+	if result.DryRun {
+		verb = "would map"
+	}
+	fmt.Fprintf(
+		out,
+		"%s %s: %s -> %s\n",
+		successStyle.Render(verb),
+		packageStyle.Render(result.Package),
+		pathStyle.Render(result.Target),
+		pathStyle.Render(result.SourcePath),
+	)
 }
 
 func renderStatus(out io.Writer, report *dotty.StatusReport, verbose bool) {

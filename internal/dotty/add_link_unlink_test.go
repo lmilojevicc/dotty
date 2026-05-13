@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -645,6 +646,60 @@ func TestLinkDryRunValidatesForceWithoutReplacingConflict(t *testing.T) {
 	requireFileContent(t, target, "local copy\n")
 }
 
+func TestLinkDryRunReportsPlannedActionDetails(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.config]
+links = [
+  { source = "absent", target = "~/.absent" },
+  { source = "linked", target = "~/.linked" },
+  { source = "relative", target = "~/.relative" },
+  { source = "conflict", target = "~/.conflict" },
+  { source = "wrong", target = "~/.wrong" },
+]
+`)
+	for _, sourceName := range []string{"absent", "linked", "relative", "conflict", "wrong"} {
+		writeTextFile(t, filepath.Join(repo, "config", sourceName), sourceName+"\n")
+	}
+	requireNoError(
+		t,
+		os.Symlink(filepath.Join(repo, "config", "linked"), filepath.Join(home, ".linked")),
+	)
+	relativeTarget := filepath.Join(home, ".relative")
+	rel, err := filepath.Rel(
+		filepath.Dir(relativeTarget),
+		filepath.Join(repo, "config", "relative"),
+	)
+	requireNoError(t, err)
+	requireNoError(t, os.Symlink(rel, relativeTarget))
+	writeTextFile(t, filepath.Join(home, ".conflict"), "local copy\n")
+	wrongSource := filepath.Join(home, "wrong-source")
+	writeTextFile(t, wrongSource, "wrong\n")
+	requireNoError(t, os.Symlink(wrongSource, filepath.Join(home, ".wrong")))
+
+	results, err := NewService(repo, env).Link(LinkOptions{
+		Packages: []string{"config"},
+		Force:    true,
+		DryRun:   true,
+	})
+	requireNoError(t, err)
+
+	if got, want := linkResultActions(results), []string{
+		"create",
+		"noop",
+		"normalize",
+		"replace-conflict",
+		"replace-conflict",
+	}; strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected link dry-run actions\nwant: %#v\ngot:  %#v", want, got)
+	}
+	requireNoPath(t, filepath.Join(home, ".absent"))
+	assertSymlink(t, filepath.Join(home, ".linked"), filepath.Join(repo, "config", "linked"))
+	assertSymlink(t, relativeTarget, rel)
+	requireFileContent(t, filepath.Join(home, ".conflict"), "local copy\n")
+	assertSymlink(t, filepath.Join(home, ".wrong"), wrongSource)
+}
+
 func TestLinkDryRunRejectsTargetParentConflict(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
@@ -929,6 +984,49 @@ func TestUnlinkDryRunLeavesSoftAndHardTargetsUnchanged(t *testing.T) {
 		t.Fatalf("unexpected hard unlink dry-run results: %#v", results)
 	}
 	assertSymlink(t, target, source)
+}
+
+func TestUnlinkDryRunReportsPlannedActionDetails(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.config]
+links = [
+  { source = "linked", target = "~/.linked" },
+  { source = "absent", target = "~/.absent" },
+]
+`)
+	linkedSource := filepath.Join(repo, "config", "linked")
+	writeTextFile(t, linkedSource, "linked\n")
+	writeTextFile(t, filepath.Join(repo, "config", "absent"), "absent\n")
+	linkedTarget := filepath.Join(home, ".linked")
+	requireNoError(t, os.Symlink(linkedSource, linkedTarget))
+
+	softResults, err := NewService(repo, env).Unlink(UnlinkOptions{
+		Packages: []string{"config"},
+		DryRun:   true,
+	})
+	requireNoError(t, err)
+	if got, want := unlinkResultActions(softResults), []string{"copy-source", "noop"}; strings.Join(
+		got,
+		"\n",
+	) != strings.Join(want, "\n") {
+		t.Fatalf("unexpected soft unlink dry-run actions\nwant: %#v\ngot:  %#v", want, got)
+	}
+
+	hardResults, err := NewService(repo, env).Unlink(UnlinkOptions{
+		Packages: []string{"config"},
+		Hard:     true,
+		DryRun:   true,
+	})
+	requireNoError(t, err)
+	if got, want := unlinkResultActions(hardResults), []string{"remove-link", "noop"}; strings.Join(
+		got,
+		"\n",
+	) != strings.Join(want, "\n") {
+		t.Fatalf("unexpected hard unlink dry-run actions\nwant: %#v\ngot:  %#v", want, got)
+	}
+	assertSymlink(t, linkedTarget, linkedSource)
+	requireNoPath(t, filepath.Join(home, ".absent"))
 }
 
 func TestUnlinkDryRunRejectsSourceThatCannotBeCopied(t *testing.T) {
@@ -1266,6 +1364,206 @@ func TestUnlinkReportsRollbackFailure(t *testing.T) {
 	requireNoPath(t, target)
 	requireFileContent(t, source, "export EDITOR=vim\n")
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
+func TestMapAddsManifestLinkMappingWithoutTouchingTargetPath(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "zsh"), 0o755))
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	target := filepath.Join(home, ".config", "shell", "zshrc")
+	writeTextFile(t, target, "local copy remains\n")
+
+	result, err := NewService(repo, env).Map(MapOptions{
+		Package: "zsh",
+		Source:  ".zshrc",
+		Target:  target,
+	})
+	requireNoError(t, err)
+
+	if result.Package != "zsh" || result.Source != ".zshrc" ||
+		result.Target != "~/.config/shell/zshrc" || result.DryRun {
+		t.Fatalf("unexpected map result: %#v", result)
+	}
+	requireFileContent(t, target, "local copy remains\n")
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+  { source = ".zshrc", target = "~/.config/shell/zshrc" },
+]
+`)
+}
+
+func TestMapDryRunValidatesAndDoesNotWriteManifest(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux"), 0o755))
+	writeTextFile(t, filepath.Join(repo, "tmux", "tmux.conf"), "set -g mouse on\n")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.tmux]
+links = []
+`)
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	result, err := NewService(repo, env).Map(MapOptions{
+		Package: "tmux",
+		Source:  "tmux.conf",
+		Target:  "~/.config/tmux/tmux.conf",
+		DryRun:  true,
+	})
+	requireNoError(t, err)
+
+	if !result.DryRun || result.Package != "tmux" || result.Source != "tmux.conf" ||
+		result.Target != "~/.config/tmux/tmux.conf" ||
+		result.SourcePath != "~/dotfiles/tmux/tmux.conf" {
+		t.Fatalf("unexpected dry-run map result: %#v", result)
+	}
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
+func TestMapDuplicateTargetAcrossPackagesReportsExistingAndNewPackages(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux"), 0o755))
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
+	writeTextFile(t, filepath.Join(repo, "tmux", "tmux.conf"), "set -g mouse on\n")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.tmux]
+links = []
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = NewService(repo, env).Map(MapOptions{
+		Package: "tmux",
+		Source:  "tmux.conf",
+		Target:  "~/.zshrc",
+	})
+
+	requireErrorContains(t, err, "target \"~/.zshrc\" is mapped more than once (zsh and tmux)")
+	if strings.Contains(err.Error(), "(zsh and zsh)") {
+		t.Fatalf("duplicate target diagnostic repeated the existing package: %q", err.Error())
+	}
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
+func TestMapValidatesPackageSourceTargetAndDuplicateTargets(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "zsh"), 0o755))
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+	svc := NewService(repo, env)
+
+	tests := []struct {
+		name    string
+		options MapOptions
+		wantErr string
+	}{
+		{
+			name: "unknown package",
+			options: MapOptions{
+				Package: "tmux",
+				Source:  ".zshrc",
+				Target:  "~/.config/tmux/tmux.conf",
+			},
+			wantErr: "unknown package",
+		},
+		{
+			name: "escaping source",
+			options: MapOptions{
+				Package: "zsh",
+				Source:  "../.zshrc",
+				Target:  "~/.config/zshrc",
+			},
+			wantErr: "escapes the package root",
+		},
+		{
+			name: "missing source",
+			options: MapOptions{
+				Package: "zsh",
+				Source:  ".missing",
+				Target:  "~/.config/zshrc",
+			},
+			wantErr: "source \".missing\" is missing",
+		},
+		{
+			name: "relative target",
+			options: MapOptions{
+				Package: "zsh",
+				Source:  ".zshrc",
+				Target:  ".config/zshrc",
+			},
+			wantErr: "must be absolute or home-relative",
+		},
+		{
+			name: "dangerous target topology",
+			options: MapOptions{
+				Package: "zsh",
+				Source:  ".zshrc",
+				Target:  filepath.Join(repo, "target"),
+			},
+			wantErr: "dangerous Target Path",
+		},
+		{
+			name: "duplicate expanded target",
+			options: MapOptions{
+				Package: "zsh",
+				Source:  ".zshrc",
+				Target:  filepath.Join(home, ".zshrc"),
+			},
+			wantErr: "mapped more than once",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.Map(tt.options)
+			requireErrorContains(t, err, tt.wantErr)
+			requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+		})
+	}
+}
+
+func linkResultActions(results []LinkResult) []string {
+	actions := make([]string, 0, len(results))
+	for _, result := range results {
+		actions = append(actions, result.Action)
+	}
+	return actions
+}
+
+func unlinkResultActions(results []UnlinkResult) []string {
+	actions := make([]string, 0, len(results))
+	for _, result := range results {
+		actions = append(actions, result.Action)
+	}
+	return actions
 }
 
 func setupLinkedPackageTest(t *testing.T, manifest string) (home string, repo string, env Env) {

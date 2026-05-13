@@ -92,6 +92,17 @@ func completeAddArgs(
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
+func (a *app) completeMapArgs(
+	cmd *cobra.Command,
+	args []string,
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		return a.completePackages(cmd, args, toComplete)
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
 func completeDirectories(
 	cmd *cobra.Command,
 	args []string,

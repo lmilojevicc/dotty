@@ -28,7 +28,7 @@ This makes status, conflict detection, unlink behavior, and migration from symli
 
 - **Explicit manifest**: Every managed target is recorded in `dotty.toml` as a source-to-target Link Mapping.
 - **Safe by default**: Non-symlink content at a Target Path is a Conflict unless you explicitly pass `--force`.
-- **Dry runs**: Preview `add`, `link`, and `unlink` operations without changing files.
+- **Dry runs**: Preview `add`, `map`, `link`, and `unlink` operations without changing files.
 - **Collections**: Link or unlink named groups of Packages without adding OS-specific inference rules.
 - **Status reporting**: See linked, unlinked, partial, conflict, missing-source, empty, and untracked states.
 - **Soft and hard unlink**: Leave a target-side copy by default, or remove only expected Dotty Links with `--hard`.
@@ -76,7 +76,7 @@ dotty completion fish
 dotty completion powershell
 ```
 
-Completions resolve the same Dotfiles Repository as normal commands, then suggest Package names for `link`, `unlink`, and `status`, Collection names for `--collection`, and status values for `dotty status --state`. The `add` command keeps its Package argument freeform, so it does not suggest existing Packages.
+Completions resolve the same Dotfiles Repository as normal commands, then suggest Package names for `map`, `link`, `unlink`, and `status`, Collection names for `--collection`, and status values for `dotty status --state`. The `add` command keeps its Package argument freeform, so it does not suggest existing Packages.
 
 Example local installs:
 
@@ -119,11 +119,18 @@ dotty add ~/.config/tmux tmux
 # Preview the same add operation without writing files
 dotty add --dry-run ~/.config/tmux tmux
 
+# Add another Link Mapping for an existing Package Source without touching files
+dotty map tmux . ~/.tmux
+dotty map --dry-run tmux . ~/.tmux
+
 # Link or unlink a Package
+dotty link --dry-run tmux
 dotty link tmux
+dotty unlink --dry-run tmux
 dotty unlink tmux
 
 # Remove only expected Dotty Links without leaving target-side copies
+dotty unlink --hard --dry-run tmux
 dotty unlink --hard tmux
 
 # Link or unlink every Package in the Manifest
@@ -175,12 +182,15 @@ dotty unlink --collection terminal
 > [!NOTE]
 > Dotty normalizes `dotty.toml` when commands write the Manifest. Hand formatting and comments in the Manifest are not preserved.
 
+Use `dotty map <package> <source> <target>` to add a Link Mapping from an existing Package Source to an additional Target Path without copying, moving, or linking filesystem content. The Package and Package Source must already exist; `map` only validates and writes the Manifest. Run `dotty link` later to create the Link, using `--force` only if that Target Path is a Conflict you intentionally want to replace.
+
 ## Commands
 
 | Command                                                          | Purpose                                                              | Useful flags                                    |
 | ---------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
 | `dotty init [<path>]`                                            | Initialize a Dotfiles Repository and remember it as the default.     | None                                            |
 | `dotty add <path> <package>`                                     | Adopt an existing file, directory, or symlink target into a Package. | `--dry-run`                                     |
+| `dotty map <package> <source> <target>`                          | Add a Manifest Link Mapping without changing files.                  | `--dry-run`                                     |
 | `dotty link <package>... \| --all \| --collection <collection>`   | Create Links for selected Packages.                                  | `--all`, `--collection`, `--force`, `--dry-run` |
 | `dotty unlink <package>... \| --all \| --collection <collection>` | Remove Links for selected Packages.                                  | `--all`, `--collection`, `--hard`, `--dry-run`  |
 | `dotty status [<package>...]`                                    | Show package state inferred from the Manifest and filesystem.        | `--state`, `--verbose`, `-v`                    |
@@ -189,6 +199,8 @@ dotty unlink --collection terminal
 | `dotty completion <shell>`                                       | Generate shell completion scripts.                                   | `bash`, `zsh`, `fish`, `powershell`             |
 
 All commands accept the global `--repo` flag when they need to operate on a specific Dotfiles Repository.
+
+Dry-run output describes the planned Link Mapping action. For example, `dotty link --dry-run` distinguishes already linked no-ops, new Links, relative Link normalization, and `--force` Conflict replacements; `dotty unlink --dry-run` distinguishes soft Unlink copies, Hard Unlink removals, and already absent no-ops.
 
 `dotty status` prints the resolved Dotfiles Repository, package states, untracked repository content, and a summary count. Use `--state <state>` to keep aggregate Package rows and untracked rows that match a state. Repeat `--state` to include the union of several states, for example `dotty status --state conflict --state missing-source`. Supported values are `linked`, `unlinked`, `partial`, `conflict`, `missing-source`, `empty`, and `untracked`. Use `dotty status --verbose` or `dotty status -v` for per-Link Mapping status; verbose output shows details only for retained Packages. `-v` is scoped to `status`, while the version flag is `--version` or `dotty version`.
 

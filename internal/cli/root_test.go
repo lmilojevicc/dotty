@@ -170,7 +170,7 @@ links = [
 		t.Fatalf("link --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "would link zsh: ~/.zshrc -> ~/dotfiles/zsh/.zshrc\n"
+	want := "would replace conflict zsh: ~/.zshrc -> ~/dotfiles/zsh/.zshrc\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -204,12 +204,77 @@ links = [
 		t.Fatalf("link --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "would link zsh: ~/.zshrc -> ~/dotfiles/zsh/.zshrc\n"
+	want := "would create link zsh: ~/.zshrc -> ~/dotfiles/zsh/.zshrc\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
 	if _, err := os.Lstat(target); err == nil || !os.IsNotExist(err) {
 		t.Fatalf("dry-run created target: %v", err)
+	}
+	requireSnapshotUnchanged(t, home, homeBefore)
+}
+
+func TestLinkDryRunPrintsDetailedActions(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.config]
+links = [
+  { source = "absent", target = "~/.absent" },
+  { source = "linked", target = "~/.linked" },
+  { source = "relative", target = "~/.relative" },
+  { source = "conflict", target = "~/.conflict" },
+]
+`)
+	if err := os.MkdirAll(filepath.Join(repo, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, sourceName := range []string{"absent", "linked", "relative", "conflict"} {
+		if err := os.WriteFile(
+			filepath.Join(repo, "config", sourceName),
+			[]byte(sourceName+"\n"),
+			0o644,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(
+		filepath.Join(repo, "config", "linked"),
+		filepath.Join(home, ".linked"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	relativeTarget := filepath.Join(home, ".relative")
+	rel, err := filepath.Rel(
+		filepath.Dir(relativeTarget),
+		filepath.Join(repo, "config", "relative"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(rel, relativeTarget); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(home, ".conflict"),
+		[]byte("local copy\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	homeBefore := snapshotTree(t, home)
+
+	out, errOut, err := executeCommand("--repo", repo, "link", "--force", "--dry-run", "config")
+	if err != nil {
+		t.Fatalf("link --force --dry-run failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "would create link config: ~/.absent -> ~/dotfiles/config/absent\n" +
+		"already linked config: ~/.linked -> ~/dotfiles/config/linked\n" +
+		"would normalize link config: ~/.relative -> ~/dotfiles/config/relative\n" +
+		"would replace conflict config: ~/.conflict -> ~/dotfiles/config/conflict\n"
+	if out != want {
+		t.Fatalf("unexpected detailed link dry-run output\nwant: %q\ngot:  %q", want, out)
 	}
 	requireSnapshotUnchanged(t, home, homeBefore)
 }
@@ -278,11 +343,62 @@ links = [
 		t.Fatalf("unlink --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "would unlink zsh: ~/.zshrc (copy left)\n"
+	want := "would copy Package Source zsh: ~/.zshrc (soft Unlink)\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
 	assertSymlink(t, target, source)
+	requireSnapshotUnchanged(t, home, homeBefore)
+}
+
+func TestUnlinkDryRunPrintsDetailedActions(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.config]
+links = [
+  { source = "linked", target = "~/.linked" },
+  { source = "absent", target = "~/.absent" },
+]
+`)
+	if err := os.MkdirAll(filepath.Join(repo, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkedSource := filepath.Join(repo, "config", "linked")
+	if err := os.WriteFile(linkedSource, []byte("linked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(repo, "config", "absent"),
+		[]byte("absent\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(linkedSource, filepath.Join(home, ".linked")); err != nil {
+		t.Fatal(err)
+	}
+	homeBefore := snapshotTree(t, home)
+
+	out, errOut, err := executeCommand("--repo", repo, "unlink", "--dry-run", "config")
+	if err != nil {
+		t.Fatalf("unlink --dry-run failed: %v\nstderr: %s", err, errOut)
+	}
+	want := "would copy Package Source config: ~/.linked (soft Unlink)\n" +
+		"already absent config: ~/.absent (no-op)\n"
+	if out != want {
+		t.Fatalf("unexpected soft unlink dry-run output\nwant: %q\ngot:  %q", want, out)
+	}
+
+	out, errOut, err = executeCommand("--repo", repo, "unlink", "--hard", "--dry-run", "config")
+	if err != nil {
+		t.Fatalf("unlink --hard --dry-run failed: %v\nstderr: %s", err, errOut)
+	}
+	want = "would remove link config: ~/.linked (Hard Unlink)\n" +
+		"already absent config: ~/.absent (no-op)\n"
+	if out != want {
+		t.Fatalf("unexpected hard unlink dry-run output\nwant: %q\ngot:  %q", want, out)
+	}
 	requireSnapshotUnchanged(t, home, homeBefore)
 }
 
@@ -313,7 +429,7 @@ links = [
 		t.Fatalf("unlink --hard --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "would hard-unlink zsh: ~/.zshrc (link removed)\n"
+	want := "would remove link zsh: ~/.zshrc (Hard Unlink)\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -418,6 +534,12 @@ func TestCommandSurfaceInventory(t *testing.T) {
 			name:  "add",
 			use:   "add <path> <package>",
 			short: "Adopt an existing file, directory, or symlink target into a package",
+			flags: []string{"dry-run:"},
+		},
+		{
+			name:  "map",
+			use:   "map <package> <source> <target>",
+			short: "Add a Manifest Link Mapping without changing files",
 			flags: []string{"dry-run:"},
 		},
 		{
@@ -527,6 +649,16 @@ func TestHelpVersionAndCompletionAreRepositoryIndependent(t *testing.T) {
 			args: []string{"add", "--help"},
 			want: []string{
 				"Usage:\n  dotty add <path> <package> [flags]\n",
+				"Options:\n      --dry-run",
+				"Global options:\n      --repo string",
+			},
+		},
+		{
+			name: "map help",
+			args: []string{"map", "--help"},
+			want: []string{
+				"Usage:\n  dotty map <package> <source> <target> [flags]\n",
+				"Add a Manifest Link Mapping without changing files",
 				"Options:\n      --dry-run",
 				"Global options:\n      --repo string",
 			},
@@ -1290,7 +1422,7 @@ links = [
 ]
 `)
 
-	for _, command := range []string{"link", "unlink", "status"} {
+	for _, command := range []string{"map", "link", "unlink", "status"} {
 		t.Run(command, func(t *testing.T) {
 			choices, directive, errOut, err := executeCompletionResult("--repo", repo, command, "")
 			if err != nil {
@@ -2077,6 +2209,105 @@ links = [
 	}
 }
 
+func TestMapPrintsAddedMappingAndOnlyWritesManifest(t *testing.T) {
+	home, repo := setupCLITest(t)
+	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(repo, "zsh", ".zshrc"),
+		[]byte("export EDITOR=vim\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	target := filepath.Join(home, ".config", "shell", "zshrc")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("local copy remains\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, err := executeCommand("--repo", repo, "map", "zsh", ".zshrc", target)
+	if err != nil {
+		t.Fatalf("map failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "mapped zsh: ~/.config/shell/zshrc -> ~/dotfiles/zsh/.zshrc\n"
+	if out != want {
+		t.Fatalf("unexpected map output\nwant: %q\ngot:  %q", want, out)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "local copy remains\n" {
+		t.Fatalf("target changed: data=%q err=%v", string(data), err)
+	}
+	if data, err := os.ReadFile(
+		dotty.ManifestPath(repo),
+	); err != nil ||
+		string(data) != `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+  { source = ".zshrc", target = "~/.config/shell/zshrc" },
+]
+` {
+		t.Fatalf("manifest mismatch:\n%s\nerr=%v", string(data), err)
+	}
+}
+
+func TestMapDryRunPrintsWouldMapAndDoesNotWriteManifest(t *testing.T) {
+	_, repo := setupCLITest(t)
+	if err := os.MkdirAll(filepath.Join(repo, "tmux"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(repo, "tmux", "tmux.conf"),
+		[]byte("set -g mouse on\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, repo, `version = 1
+
+[packages.tmux]
+links = []
+`)
+	manifestBefore, err := os.ReadFile(dotty.ManifestPath(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, err := executeCommand(
+		"--repo",
+		repo,
+		"map",
+		"--dry-run",
+		"tmux",
+		"tmux.conf",
+		"~/.config/tmux/tmux.conf",
+	)
+	if err != nil {
+		t.Fatalf("map --dry-run failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "would map tmux: ~/.config/tmux/tmux.conf -> ~/dotfiles/tmux/tmux.conf\n"
+	if out != want {
+		t.Fatalf("unexpected map dry-run output\nwant: %q\ngot:  %q", want, out)
+	}
+	if data, err := os.ReadFile(dotty.ManifestPath(repo)); err != nil ||
+		string(data) != string(manifestBefore) {
+		t.Fatalf("manifest changed: data=%q err=%v", string(data), err)
+	}
+}
+
 func TestCommandReturnsCoreErrors(t *testing.T) {
 	_, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
@@ -2124,6 +2355,11 @@ func TestCommandArgumentDiagnosticsCoverInvalidShapes(t *testing.T) {
 			name: "add missing args",
 			args: []string{"add"},
 			want: "usage: dotty add <path> <package>",
+		},
+		{
+			name: "map missing args",
+			args: []string{"map", "zsh"},
+			want: "usage: dotty map <package> <source> <target>",
 		},
 		{
 			name: "link missing selector",

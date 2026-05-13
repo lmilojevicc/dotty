@@ -17,6 +17,7 @@ type LinkResult struct {
 	Package    string
 	Target     string
 	SourcePath string
+	Action     string
 	DryRun     bool
 }
 
@@ -201,8 +202,24 @@ func (s Service) linkResults(plan *linkPlan, dryRun bool) []LinkResult {
 			Package:    a.packageName,
 			Target:     a.mapping.Target,
 			SourcePath: HomeRelative(a.sourceAbs, s.Env),
+			Action:     linkResultAction(a.state),
 			DryRun:     dryRun,
 		}
 	}
 	return results
+}
+
+func linkResultAction(state linkTargetState) string {
+	switch state {
+	case linkTargetAbsent:
+		return LinkResultActionCreate
+	case linkTargetAlreadyCorrect:
+		return LinkResultActionNoop
+	case linkTargetRelativeCorrect:
+		return LinkResultActionNormalize
+	case linkTargetWrongSymlink, linkTargetNonSymlink:
+		return LinkResultActionReplaceConflict
+	default:
+		return ""
+	}
 }

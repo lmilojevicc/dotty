@@ -56,6 +56,10 @@ _Avoid_: setup, bootstrap
 An operation that adopts existing configuration into the **Dotfiles Repository**, replaces the original location with a **Link**, and records it in the **Manifest**.
 _Avoid_: import, track
 
+**Map**:
+An operation that records a **Link Mapping** from an existing **Package Source** to a **Target Path** without copying, moving, linking, or otherwise changing filesystem content outside the **Manifest**.
+_Avoid_: import, install, discover
+
 **Symlink Adoption**:
 An **Add** case where the target path is already a symlink and Dotty adopts the symlink’s resolved content instead of the symlink object.
 _Avoid_: symlink import, link copying
@@ -125,7 +129,7 @@ _Avoid_: transaction, all-or-nothing filesystem write
 - A **Package** has one or more **Link Mappings**.
 - Each **Link Mapping** connects exactly one **Package Source** to exactly one **Target Path**.
 - Multiple **Link Mappings** may share the same **Package Source**.
-- Additional **Link Mappings** for an existing **Package Source** are created by editing the **Manifest**.
+- Additional **Link Mappings** for an existing **Package Source** are created with **Map** or by editing the **Manifest**.
 - A **Link** exists at a **Target Path** and points to a **Package Source**.
 - Whether a **Package** is a **Linked Package**, **Unlinked Package**, **Partial Package**, **Empty Package**, or has **Missing Source** is inferred from the filesystem and manifest, not stored as mutable state.
 - Any non-symlink content at a **Target Path** is a **Conflict**, including a copy left by **Unlink**.
@@ -135,9 +139,10 @@ _Avoid_: transaction, all-or-nothing filesystem write
 - Status reports **Untracked Repository Content** by scanning the **Dotfiles Repository**, not by scanning arbitrary target-side directories.
 - **List** reports manifest inventory; status reports filesystem state.
 - **Init** does not overwrite existing package content or an existing **Manifest**.
-- **Add**, **Unlink**, and **Hard Unlink** operate on **Packages** and their **Links**.
+- **Map** operates on **Packages** and **Link Mappings**; link creation, **Unlink**, and **Hard Unlink** operate on **Packages** and target-side **Links**.
 - Link and unlink commands operate on explicitly selected **Packages**, on all **Packages** when the user provides an explicit all option, and on **Collections** when the user provides an explicit collection option.
 - **Add**, **Unlink**, **Hard Unlink**, and link creation are **Atomic Operations**.
+- **Map** is a Manifest-only **Atomic Operation** and does not create, remove, copy, or replace target-side content.
 - **Hard Unlink** does not delete target-side files or directories that are not the expected Dotty **Links**.
 - Adding a directory as a new **Package** uses the **Package Root** as the **Package Source**.
 - Adding a file as a new **Package** creates a **Package Source** whose default **Source Name** is the basename of the **Target Path**.

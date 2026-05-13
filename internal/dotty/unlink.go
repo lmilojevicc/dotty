@@ -16,6 +16,7 @@ type UnlinkOptions struct {
 type UnlinkResult struct {
 	Package string
 	Target  string
+	Action  string
 	Hard    bool
 	DryRun  bool
 }
@@ -76,11 +77,22 @@ func (s Service) unlinkResults(plan *unlinkPlan, dryRun bool) []UnlinkResult {
 		results[i] = UnlinkResult{
 			Package: a.packageName,
 			Target:  a.mapping.Target,
+			Action:  unlinkResultAction(a.state, a.hard),
 			Hard:    a.hard,
 			DryRun:  dryRun,
 		}
 	}
 	return results
+}
+
+func unlinkResultAction(state unlinkTargetState, hard bool) string {
+	if state == unlinkTargetAbsent {
+		return UnlinkResultActionNoop
+	}
+	if hard {
+		return UnlinkResultActionRemoveLink
+	}
+	return UnlinkResultActionCopySource
 }
 
 func (s Service) planUnlink(options UnlinkOptions) (*unlinkPlan, error) {
