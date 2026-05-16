@@ -26,6 +26,7 @@ type addPlan struct {
 	adoptPath       string
 	dest            string
 	symlinkAdoption bool
+	copyAdoption    bool
 	destExists      bool
 }
 
@@ -61,6 +62,14 @@ func (s Service) AddWithOptions(options AddOptions) (*AddResult, error) {
 			if !plan.destExists {
 				if plan.symlinkAdoption {
 					if err := CopyPathTx(tx, plan.adoptPath, plan.dest); err != nil {
+						return err
+					}
+				} else if plan.copyAdoption {
+					if err := CopyPathAndMoveAsideSourceTx(
+						tx,
+						plan.targetAbs,
+						plan.dest,
+					); err != nil {
 						return err
 					}
 				} else {
@@ -128,6 +137,12 @@ func (s Service) planAdd(
 		}
 		return nil, fmt.Errorf("inspect target %s: %w", targetAbs, err)
 	}
+	if err := validateTargetTopology(targetAbs, s.Repo, s.Env); err != nil {
+		return nil, err
+	}
+	if err := validateTargetParentsAreLexicalDirectories(targetAbs, s.Env); err != nil {
+		return nil, err
+	}
 
 	adoptPath := targetAbs
 	symlinkAdoption := targetInfo.Mode()&os.ModeSymlink != 0
@@ -143,6 +158,21 @@ func (s Service) planAdd(
 	if err != nil {
 		return nil, fmt.Errorf("inspect adopted content %s: %w", adoptPath, err)
 	}
+	if err := validateSupportedSourcePath(adoptPath); err != nil {
+		return nil, err
+	}
+	if externalHardlinks, err := hasPreservedSymlinkReferentHardlinksOutsideRoot(
+		adoptPath,
+		adoptPath,
+		adoptPath,
+	); err != nil {
+		return nil, err
+	} else if externalHardlinks {
+		return nil, fmt.Errorf(
+			"target %s has symlink referents with external hardlink aliases (copy them into the adopted tree before adding)",
+			targetAbs,
+		)
+	}
 
 	_, packageExists := manifest.Packages[packageName]
 	packageRoot := PackageRoot(s.Repo, packageName)
@@ -153,6 +183,19 @@ func (s Service) planAdd(
 		dest = packageRoot
 	}
 	dest = filepath.Clean(dest)
+
+	copyAdoption := false
+	if !symlinkAdoption {
+		copyAdoption, err = hasExternalHardlinks(adoptPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if dryRun && copyAdoption {
+		if err := validateCopyablePath(adoptPath); err != nil {
+			return nil, err
+		}
+	}
 
 	destExists, err := pathExists(dest)
 	if err != nil {
@@ -169,6 +212,17 @@ func (s Service) planAdd(
 			return nil, fmt.Errorf(
 				"target %s still exists and is not a symlink (remove or move it aside before adding)",
 				targetAbs,
+			)
+		}
+		if err := validateSupportedSourcePath(dest); err != nil {
+			return nil, err
+		}
+		if externalHardlinks, err := hasHardlinksOutsideRoot(dest, s.Repo); err != nil {
+			return nil, err
+		} else if externalHardlinks {
+			return nil, fmt.Errorf(
+				"repo-side package source %s has external hardlink aliases (copy it into the Dotfiles Repository before adding)",
+				dest,
 			)
 		}
 	} else if symlinkAdoption {
@@ -210,6 +264,7 @@ func (s Service) planAdd(
 		adoptPath:       adoptPath,
 		dest:            dest,
 		symlinkAdoption: symlinkAdoption,
+		copyAdoption:    copyAdoption,
 		destExists:      destExists,
 	}, nil
 }

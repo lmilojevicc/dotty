@@ -127,12 +127,27 @@ func (s Service) classifyLinkAction(
 			mapping.Source,
 		)
 	}
+	if err := validateSupportedSourcePath(sourceAbs); err != nil {
+		return action, err
+	}
+	if externalHardlinks, err := hasHardlinksOutsideRoot(sourceAbs, s.Repo); err != nil {
+		return action, err
+	} else if externalHardlinks {
+		return action, fmt.Errorf(
+			"package %q source %q has external hardlink aliases (copy it into the Dotfiles Repository before linking)",
+			packageName,
+			mapping.Source,
+		)
+	}
 
 	targetAbs, err := ExpandTargetPath(mapping.Target, s.Env)
 	if err != nil {
 		return action, err
 	}
 	action.targetAbs = targetAbs
+	if err := validateTargetParentsAreLexicalDirectories(targetAbs, s.Env); err != nil {
+		return action, err
+	}
 
 	info, err := os.Lstat(targetAbs)
 	if err != nil {

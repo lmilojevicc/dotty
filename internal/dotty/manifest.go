@@ -17,7 +17,7 @@ var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 func LoadManifest(repo string, env Env) (*Manifest, error) {
 	path := ManifestPath(repo)
-	data, err := os.ReadFile(path)
+	data, err := readRegularFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("manifest not found at %s; run `dotty init %s`", path, repo)

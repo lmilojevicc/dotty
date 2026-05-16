@@ -83,6 +83,18 @@ func (s Service) planMap(manifest *Manifest, options MapOptions) (*MapResult, er
 			options.Source,
 		)
 	}
+	if err := validateSupportedSourcePath(sourceAbs); err != nil {
+		return nil, err
+	}
+	if externalHardlinks, err := hasHardlinksOutsideRoot(sourceAbs, s.Repo); err != nil {
+		return nil, err
+	} else if externalHardlinks {
+		return nil, fmt.Errorf(
+			"package %q source %q has external hardlink aliases (copy it into the Dotfiles Repository before mapping)",
+			options.Package,
+			options.Source,
+		)
+	}
 
 	storedTarget, err := StoreTargetPath(options.Target, s.Env)
 	if err != nil {

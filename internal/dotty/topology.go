@@ -2,6 +2,7 @@ package dotty
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 )
 
@@ -28,7 +29,10 @@ func validateLinkMappingTopology(repo, packageName string, link LinkMapping, env
 	if err != nil {
 		return err
 	}
-	return validateTargetTopology(targetAbs, repo, env)
+	if err := validateTargetTopology(targetAbs, repo, env); err != nil {
+		return err
+	}
+	return validateTargetParentsAreLexicalDirectories(targetAbs, env)
 }
 
 func validateTargetTopology(targetAbs, repo string, env Env) error {
@@ -54,6 +58,56 @@ type topologyPathState struct {
 	clean          string
 	resolved       string
 	parentResolved string
+}
+
+func validateTargetParentsAreLexicalDirectories(targetAbs string, env Env) error {
+	target := filepath.Clean(targetAbs)
+	if env.Home != "" {
+		home := filepath.Clean(env.Home)
+		if isWithin(home, target) {
+			for parent := filepath.Dir(target); parent != home; parent = filepath.Dir(parent) {
+				if err := validateTargetParentIsLexicalDirectory(targetAbs, parent); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
+
+	return validateAbsoluteTargetParentsAreLexicalDirectories(targetAbs, filepath.Dir(target))
+}
+
+func validateAbsoluteTargetParentsAreLexicalDirectories(targetAbs, firstParent string) error {
+	for parent := firstParent; parent != "." && parent != string(filepath.Separator) && parent != filepath.Dir(parent); parent = filepath.Dir(parent) {
+		if parent != firstParent && filepath.Dir(parent) == string(filepath.Separator) {
+			return nil
+		}
+		if err := validateTargetParentIsLexicalDirectory(targetAbs, parent); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateTargetParentIsLexicalDirectory(targetAbs, parent string) error {
+	if parent == "." || parent == string(filepath.Separator) || parent == filepath.Dir(parent) {
+		return nil
+	}
+	info, err := os.Lstat(parent)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("inspect Target Path parent %s: %w", parent, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf(
+			"target path %s has symlinked parent %s (operate on the lexical Target Path parent directly before continuing)",
+			targetAbs,
+			parent,
+		)
+	}
+	return nil
 }
 
 func topologyPath(path string) topologyPathState {

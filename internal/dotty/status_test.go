@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"syscall"
 	"testing"
 )
 
@@ -117,6 +118,176 @@ func TestStatusStateFilter(t *testing.T) {
 			t.Fatalf("untracked items mutated in original report: %#v", original.Untracked)
 		}
 	})
+}
+
+func TestStatusReportsEscapingPackageSourceSymlinkAsConflict(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, manifestWithSingleZshrcLink)
+	external := filepath.Join(home, "external", ".zshrc")
+	writeTextFile(t, external, "external config\n")
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	requireNoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+	requireNoError(t, os.Symlink(external, source))
+
+	report, err := NewService(repo, env).Status([]string{"zsh"})
+	requireNoError(t, err)
+	if len(report.Packages) != 1 {
+		t.Fatalf("expected one package status, got %d", len(report.Packages))
+	}
+	if got := report.Packages[0].State; got != StateConflict {
+		t.Fatalf("escaping Package Source symlink should report CONFLICT, got %s", got)
+	}
+	if len(report.Packages[0].Entries) != 1 ||
+		report.Packages[0].Entries[0].State != StateConflict {
+		t.Fatalf(
+			"escaping Package Source symlink entry should report CONFLICT, got %#v",
+			report.Packages[0].Entries,
+		)
+	}
+}
+
+func TestStatusReportsUnsupportedSpecialFilePackageSourceAsConflict(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.pipes]
+links = [
+  { source = "app.pipe", target = "~/.config/app.pipe" },
+]
+`)
+	source := filepath.Join(repo, "pipes", "app.pipe")
+	requireNoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+	requireNoError(t, syscall.Mkfifo(source, 0o600))
+	target := filepath.Join(home, ".config", "app.pipe")
+	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+	requireNoError(t, os.Symlink(source, target))
+
+	report, err := NewService(repo, env).Status([]string{"pipes"})
+	requireNoError(t, err)
+	if len(report.Packages) != 1 {
+		t.Fatalf("expected one package status, got %d", len(report.Packages))
+	}
+	if got := report.Packages[0].State; got != StateConflict {
+		t.Fatalf("unsupported Package Source should report CONFLICT, got %s", got)
+	}
+	if len(report.Packages[0].Entries) != 1 ||
+		report.Packages[0].Entries[0].State != StateConflict {
+		t.Fatalf(
+			"unsupported Package Source entry should report CONFLICT, got %#v",
+			report.Packages[0].Entries,
+		)
+	}
+}
+
+func TestStatusReportsExternalHardlinkPackageSourceAsConflict(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, manifestWithSingleZshrcLink)
+	protected := filepath.Join(home, "protected-zshrc")
+	writeTextFile(t, protected, "export TOKEN=keep\n")
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	requireNoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+	if err := os.Link(protected, source); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+	target := filepath.Join(home, ".zshrc")
+	requireNoError(t, os.Symlink(source, target))
+
+	report, err := NewService(repo, env).Status([]string{"zsh"})
+	requireNoError(t, err)
+	if len(report.Packages) != 1 {
+		t.Fatalf("expected one package status, got %d", len(report.Packages))
+	}
+	if got := report.Packages[0].State; got != StateConflict {
+		t.Fatalf("external-hardlink Package Source should report CONFLICT, got %s", got)
+	}
+	if len(report.Packages[0].Entries) != 1 ||
+		report.Packages[0].Entries[0].State != StateConflict {
+		t.Fatalf(
+			"external-hardlink entry should report CONFLICT, got %#v",
+			report.Packages[0].Entries,
+		)
+	}
+}
+
+func TestStatusReportsAbsentTargetUnderSymlinkedParentAsConflict(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "~/.config/config" },
+]
+`)
+	source := filepath.Join(repo, "app", "config")
+	writeTextFile(t, source, "managed config\n")
+	externalParent := filepath.Join(filepath.Dir(home), "external-config")
+	requireNoError(t, os.MkdirAll(externalParent, 0o755))
+	targetParent := filepath.Join(home, ".config")
+	requireNoError(t, os.RemoveAll(targetParent))
+	requireNoError(t, os.Symlink(externalParent, targetParent))
+
+	report, err := NewService(repo, env).Status([]string{"app"})
+	requireNoError(t, err)
+	if len(report.Packages) != 1 {
+		t.Fatalf("expected one package status, got %d", len(report.Packages))
+	}
+	if got := report.Packages[0].State; got != StateConflict {
+		t.Fatalf("absent Target Path under symlinked parent should report CONFLICT, got %s", got)
+	}
+	if len(report.Packages[0].Entries) != 1 ||
+		report.Packages[0].Entries[0].State != StateConflict {
+		t.Fatalf(
+			"absent Target Path under symlinked parent entry should report CONFLICT, got %#v",
+			report.Packages[0].Entries,
+		)
+	}
+	assertSymlink(t, targetParent, externalParent)
+	requireNoPath(t, filepath.Join(externalParent, "config"))
+	requireFileContent(t, source, "managed config\n")
+}
+
+func TestStatusReportsSymlinkedTargetParentAsConflictWithoutMutatingReferent(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "~/.config/config" },
+]
+`)
+	source := filepath.Join(repo, "app", "config")
+	writeTextFile(t, source, "managed config\n")
+	externalParent := filepath.Join(filepath.Dir(home), "external-config")
+	requireNoError(t, os.MkdirAll(externalParent, 0o755))
+	targetParent := filepath.Join(home, ".config")
+	requireNoError(t, os.RemoveAll(targetParent))
+	requireNoError(t, os.Symlink(externalParent, targetParent))
+	referentLink := filepath.Join(externalParent, "config")
+	requireNoError(t, os.Symlink(source, referentLink))
+
+	report, err := NewService(repo, env).Status([]string{"app"})
+	requireNoError(t, err)
+	if len(report.Packages) != 1 {
+		t.Fatalf("expected one package status, got %d", len(report.Packages))
+	}
+	if got := report.Packages[0].State; got != StateConflict {
+		t.Fatalf("symlinked Target Path parent should report CONFLICT, got %s", got)
+	}
+	if len(report.Packages[0].Entries) != 1 ||
+		report.Packages[0].Entries[0].State != StateConflict {
+		t.Fatalf(
+			"symlinked Target Path parent entry should report CONFLICT, got %#v",
+			report.Packages[0].Entries,
+		)
+	}
+	assertSymlink(t, targetParent, externalParent)
+	assertSymlink(t, referentLink, source)
+	requireFileContent(t, source, "managed config\n")
 }
 
 func TestStatusReportsPackageStates(t *testing.T) {
