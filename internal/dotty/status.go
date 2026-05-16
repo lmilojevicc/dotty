@@ -183,15 +183,31 @@ func (s Service) entryStatus(packageName string, mapping LinkMapping) EntryStatu
 	entry := EntryStatus{Package: packageName, Source: mapping.Source, Target: mapping.Target}
 	sourceAbs, err := PackageSourcePath(s.Repo, packageName, mapping.Source)
 	if err != nil {
-		entry.State = StateMissingSource
+		entry.State = StateConflict
 		return entry
 	}
 	if exists, err := pathExists(sourceAbs); err != nil || !exists {
 		entry.State = StateMissingSource
 		return entry
 	}
+	if err := validateSupportedSourcePath(sourceAbs); err != nil {
+		entry.State = StateConflict
+		return entry
+	}
+	if externalHardlinks, err := hasHardlinksOutsideRoot(
+		sourceAbs,
+		s.Repo,
+	); err != nil ||
+		externalHardlinks {
+		entry.State = StateConflict
+		return entry
+	}
 	targetAbs, err := ExpandTargetPath(mapping.Target, s.Env)
 	if err != nil {
+		entry.State = StateConflict
+		return entry
+	}
+	if err := validateTargetParentsAreLexicalDirectories(targetAbs, s.Env); err != nil {
 		entry.State = StateConflict
 		return entry
 	}

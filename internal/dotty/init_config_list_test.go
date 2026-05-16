@@ -3,7 +3,9 @@ package dotty
 import (
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestInitCreatesRepositoryManifestAndDefaultRepositoryConfig(t *testing.T) {
@@ -58,6 +60,49 @@ func TestInitRollsBackCreatedRepositoryWhenConfigSaveFails(t *testing.T) {
 	_, err := InitRepo(repo, env)
 	requireErrorContains(t, err, "not a directory")
 	requireNoPath(t, repo)
+}
+
+func TestInitRefusesSymlinkedConfigWithoutReplacingIt(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	externalConfig := filepath.Join(home, "external-config.toml")
+	writeTextFile(t, externalConfig, "repo = \"~/old-dotfiles\"\n")
+	configPath := env.ConfigFilePath()
+	requireNoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	requireNoError(t, os.Symlink(externalConfig, configPath))
+
+	_, err := InitRepo(repo, env)
+	requireErrorContains(t, err, "refuse to replace symlink")
+
+	assertSymlink(t, configPath, externalConfig)
+	requireFileContent(t, externalConfig, "repo = \"~/old-dotfiles\"\n")
+	requireNoPath(t, repo)
+}
+
+func TestLoadConfigRejectsFIFOWithoutBlocking(t *testing.T) {
+	_, env := setupHome(t)
+	configPath := env.ConfigFilePath()
+	requireNoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	requireNoError(t, syscall.Mkfifo(configPath, 0o600))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := LoadConfig(env)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		requireErrorContains(t, err, "not a regular file")
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("LoadConfig blocked on FIFO instead of rejecting it")
+	}
+
+	info, err := os.Lstat(configPath)
+	requireNoError(t, err)
+	if info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("expected config FIFO to remain unchanged, mode=%v", info.Mode())
+	}
 }
 
 func TestLoadConfigReturnsEmptyConfigWhenMissing(t *testing.T) {

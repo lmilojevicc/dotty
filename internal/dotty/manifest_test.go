@@ -4,10 +4,39 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
+
+func TestLoadManifestRejectsFIFOWithoutBlocking(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(repo, 0o755))
+	manifestPath := ManifestPath(repo)
+	requireNoError(t, syscall.Mkfifo(manifestPath, 0o600))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := LoadManifest(repo, env)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		requireErrorContains(t, err, "not a regular file")
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("LoadManifest blocked on FIFO instead of rejecting it")
+	}
+
+	info, err := os.Lstat(manifestPath)
+	requireNoError(t, err)
+	if info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("expected manifest FIFO to remain unchanged, mode=%v", info.Mode())
+	}
+}
 
 func TestValidateManifestNormalizesNilMaps(t *testing.T) {
 	_, env := setupHome(t)

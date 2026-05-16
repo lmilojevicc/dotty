@@ -3,6 +3,7 @@ package dotty
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 type UnlinkOptions struct {
@@ -22,12 +23,13 @@ type UnlinkResult struct {
 }
 
 type unlinkAction struct {
-	packageName string
-	mapping     LinkMapping
-	sourceAbs   string
-	targetAbs   string
-	hard        bool
-	state       unlinkTargetState
+	packageName   string
+	mapping       LinkMapping
+	sourceAbs     string
+	copySourceAbs string
+	targetAbs     string
+	hard          bool
+	state         unlinkTargetState
 }
 
 type unlinkTargetState int
@@ -132,20 +134,30 @@ func (s Service) classifyUnlinkAction(
 	action := unlinkAction{packageName: packageName, mapping: mapping, hard: hard}
 
 	sourceAbs, err := PackageSourcePath(s.Repo, packageName, mapping.Source)
+	if hard {
+		sourceAbs, err = packageSourcePathLexical(s.Repo, packageName, mapping.Source)
+	}
 	if err != nil {
 		return action, err
 	}
 	action.sourceAbs = sourceAbs
-	if err := validateLinkMappingTopology(s.Repo, packageName, mapping, s.Env); err != nil {
-		return action, err
-	}
 
 	targetAbs, err := ExpandTargetPath(mapping.Target, s.Env)
 	if err != nil {
 		return action, err
 	}
 	action.targetAbs = targetAbs
+	if hard {
+		if err := validateTargetTopology(targetAbs, s.Repo, s.Env); err != nil {
+			return action, err
+		}
+	} else if err := validateLinkMappingTopology(s.Repo, packageName, mapping, s.Env); err != nil {
+		return action, err
+	}
 
+	if err := validateTargetParentsAreLexicalDirectories(targetAbs, s.Env); err != nil {
+		return action, err
+	}
 	info, err := os.Lstat(targetAbs)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -171,7 +183,7 @@ func (s Service) classifyUnlinkAction(
 	}
 	action.state = unlinkTargetCorrect
 
-	// For soft unlink, validate that source exists and is copyable during planning
+	// For soft unlink, validate that the source copy can be materialized during planning.
 	if !hard {
 		if exists, err := pathExists(sourceAbs); err != nil {
 			return action, err
@@ -182,12 +194,57 @@ func (s Service) classifyUnlinkAction(
 				mapping.Source,
 			)
 		}
-		if err := validateCopyablePath(sourceAbs); err != nil {
+		copySourceAbs, err := unlinkCopySourcePath(sourceAbs)
+		if err != nil {
+			return action, err
+		}
+		action.copySourceAbs = copySourceAbs
+		if exists, err := pathExists(copySourceAbs); err != nil {
+			return action, err
+		} else if !exists {
+			return action, fmt.Errorf(
+				"package %q source %q is missing (restore the Package Source or use --hard to remove only the Link)",
+				packageName,
+				mapping.Source,
+			)
+		}
+		if err := validateSupportedSourcePath(copySourceAbs); err != nil {
+			return action, err
+		}
+		if externalHardlinks, err := hasPreservedSymlinkReferentHardlinksOutsideRoot(
+			copySourceAbs,
+			copySourceAbs,
+			s.Repo,
+		); err != nil {
+			return action, err
+		} else if externalHardlinks {
+			return action, fmt.Errorf(
+				"package %q source %q has symlink referents with external hardlink aliases (copy them into the Dotfiles Repository before unlinking)",
+				packageName,
+				mapping.Source,
+			)
+		}
+		if err := validateCopyablePath(copySourceAbs); err != nil {
 			return action, err
 		}
 	}
 
 	return action, nil
+}
+
+func unlinkCopySourcePath(sourceAbs string) (string, error) {
+	info, err := os.Lstat(sourceAbs)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return sourceAbs, nil
+	}
+	resolved, err := filepath.EvalSymlinks(sourceAbs)
+	if err != nil {
+		return "", fmt.Errorf("resolve source symlink %s: %w", sourceAbs, err)
+	}
+	return filepath.Clean(resolved), nil
 }
 
 func (s Service) executeUnlinkAction(tx *Tx, action *unlinkAction) error {
@@ -202,5 +259,5 @@ func (s Service) executeUnlinkAction(tx *Tx, action *unlinkAction) error {
 	if err := RemoveSymlinkTx(tx, action.targetAbs); err != nil {
 		return err
 	}
-	return CopyPathTx(tx, action.sourceAbs, action.targetAbs)
+	return CopyPathTx(tx, action.copySourceAbs, action.targetAbs)
 }

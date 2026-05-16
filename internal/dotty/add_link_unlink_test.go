@@ -58,6 +58,179 @@ links = [
 	}
 }
 
+func TestAddDirectoryPreservesInternalHardlinksWhileBreakingExternalAliases(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	svc, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	protected := filepath.Join(home, "protected-config")
+	target := filepath.Join(home, ".config", "app")
+	writeTextFile(t, protected, "secret=keep\n")
+	requireNoError(t, os.MkdirAll(target, 0o755))
+	config := filepath.Join(target, "config")
+	if err := os.Link(protected, config); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+	requireNoError(t, os.Link(config, filepath.Join(target, "config-alias")))
+
+	_, err = svc.Add(target, "app")
+	requireNoError(t, err)
+
+	source := filepath.Join(repo, "app", "config")
+	sourceAlias := filepath.Join(repo, "app", "config-alias")
+	assertSymlink(t, target, filepath.Join(repo, "app"))
+	requireFileContent(t, source, "secret=keep\n")
+	requireFileContent(t, sourceAlias, "secret=keep\n")
+	requireFileContent(t, protected, "secret=keep\n")
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	sourceInfo, err := os.Stat(source)
+	requireNoError(t, err)
+	sourceAliasInfo, err := os.Stat(sourceAlias)
+	requireNoError(t, err)
+	if os.SameFile(protectedInfo, sourceInfo) {
+		t.Fatalf("repo nested Package Source should not share an inode with external hardlink")
+	}
+	if !os.SameFile(sourceInfo, sourceAliasInfo) {
+		t.Fatalf("repo copy should preserve internal hardlink relationship")
+	}
+
+	writeTextFile(t, source, "managed edit\n")
+	requireFileContent(t, sourceAlias, "managed edit\n")
+	requireFileContent(t, protected, "secret=keep\n")
+}
+
+func TestAddDirectoryCopiesNestedHardlinksIntoRepositoryWithoutAliasingExternalInode(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	svc, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	protected := filepath.Join(home, "protected-config")
+	target := filepath.Join(home, ".config", "app")
+	writeTextFile(t, protected, "secret=keep\n")
+	requireNoError(t, os.MkdirAll(target, 0o755))
+	if err := os.Link(protected, filepath.Join(target, "config")); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+
+	_, err = svc.Add(target, "app")
+	requireNoError(t, err)
+
+	source := filepath.Join(repo, "app", "config")
+	assertSymlink(t, target, filepath.Join(repo, "app"))
+	requireFileContent(t, source, "secret=keep\n")
+	requireFileContent(t, protected, "secret=keep\n")
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	sourceInfo, err := os.Stat(source)
+	requireNoError(t, err)
+	if os.SameFile(protectedInfo, sourceInfo) {
+		t.Fatalf("repo nested Package Source should not share an inode with external hardlink")
+	}
+
+	writeTextFile(t, source, "managed edit\n")
+	requireFileContent(t, protected, "secret=keep\n")
+}
+
+func TestAddHardlinkedFileCopiesIntoRepositoryWithoutAliasingExternalInode(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	svc, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	protected := filepath.Join(home, "protected-zshrc")
+	target := filepath.Join(home, ".zshrc")
+	writeTextFile(t, protected, "export TOKEN=keep\n")
+	if err := os.Link(protected, target); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+
+	_, err = svc.Add(target, "zsh")
+	requireNoError(t, err)
+
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	assertSymlink(t, target, source)
+	requireFileContent(t, source, "export TOKEN=keep\n")
+	requireFileContent(t, protected, "export TOKEN=keep\n")
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	sourceInfo, err := os.Stat(source)
+	requireNoError(t, err)
+	if os.SameFile(protectedInfo, sourceInfo) {
+		t.Fatalf("repo Package Source should not share an inode with external hardlink")
+	}
+
+	writeTextFile(t, source, "managed edit\n")
+	requireFileContent(t, protected, "export TOKEN=keep\n")
+}
+
+func TestAddDirectoryNestedHardlinkRollbackPreservesExternalInode(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	svc, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	protected := filepath.Join(home, "protected-config")
+	target := filepath.Join(home, ".config", "app")
+	writeTextFile(t, protected, "secret=keep\n")
+	requireNoError(t, os.MkdirAll(target, 0o755))
+	if err := os.Link(protected, filepath.Join(target, "config")); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+	externalManifest := filepath.Join(home, "external-dotty.toml")
+	requireNoError(t, os.Rename(ManifestPath(repo), externalManifest))
+	requireNoError(t, os.Symlink(externalManifest, ManifestPath(repo)))
+
+	_, err = svc.Add(target, "app")
+	requireErrorContains(t, err, "refuse to replace symlink")
+
+	targetInfo, err := os.Stat(filepath.Join(target, "config"))
+	requireNoError(t, err)
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	if !os.SameFile(targetInfo, protectedInfo) {
+		t.Fatalf("rollback should preserve nested hardlink relationship")
+	}
+	requireFileContent(t, filepath.Join(target, "config"), "secret=keep\n")
+	requireFileContent(t, protected, "secret=keep\n")
+	requireNoPath(t, filepath.Join(repo, "app"))
+	assertSymlink(t, ManifestPath(repo), externalManifest)
+}
+
+func TestAddHardlinkedFileRollbackPreservesExternalHardlink(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	svc, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	protected := filepath.Join(home, "protected-zshrc")
+	target := filepath.Join(home, ".zshrc")
+	writeTextFile(t, protected, "export TOKEN=keep\n")
+	if err := os.Link(protected, target); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+	externalManifest := filepath.Join(home, "external-dotty.toml")
+	requireNoError(t, os.Rename(ManifestPath(repo), externalManifest))
+	requireNoError(t, os.Symlink(externalManifest, ManifestPath(repo)))
+
+	_, err = svc.Add(target, "zsh")
+	requireErrorContains(t, err, "refuse to replace symlink")
+
+	targetInfo, err := os.Stat(target)
+	requireNoError(t, err)
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	if !os.SameFile(targetInfo, protectedInfo) {
+		t.Fatalf("rollback should preserve original hardlink relationship")
+	}
+	requireFileContent(t, target, "export TOKEN=keep\n")
+	requireFileContent(t, protected, "export TOKEN=keep\n")
+	requireNoPath(t, filepath.Join(repo, "zsh"))
+	assertSymlink(t, ManifestPath(repo), externalManifest)
+}
+
 func TestAddDirectoryAsNewPackageRecordsRootSourceAndManifest(t *testing.T) {
 	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
@@ -142,6 +315,147 @@ links = [
 `)
 }
 
+func TestAddExternalSymlinkToDirectoryRejectsNestedSymlinkResolvingToUnsupportedSpecialFile(
+	t *testing.T,
+) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	svc, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	oldSource := filepath.Join(home, "old-stow", "app")
+	requireNoError(t, os.MkdirAll(oldSource, 0o755))
+	writeTextFile(t, filepath.Join(oldSource, "app.conf"), "regular config\n")
+	fifo := filepath.Join(home, "external-fifo")
+	requireNoError(t, syscall.Mkfifo(fifo, 0o600))
+	nestedLink := filepath.Join(oldSource, "current.pipe")
+	requireNoError(t, os.Symlink(fifo, nestedLink))
+	target := filepath.Join(home, ".config", "app")
+	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+	requireNoError(t, os.Symlink(oldSource, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = svc.Add(target, "app")
+	requireErrorContains(t, err, "unsupported file type")
+
+	assertSymlink(t, target, oldSource)
+	assertSymlink(t, nestedLink, fifo)
+	info, err := os.Lstat(fifo)
+	requireNoError(t, err)
+	if info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("external FIFO referent should remain unchanged, mode=%v", info.Mode())
+	}
+	requireNoPath(t, filepath.Join(repo, "app"))
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
+func TestAddExternalSymlinkToDirectoryRejectsAbsoluteInternalSymlinkToExternalHardlink(
+	t *testing.T,
+) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	svc, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	protected := filepath.Join(home, "protected-token")
+	writeTextFile(t, protected, "token=keep\n")
+	oldSource := filepath.Join(home, "old-stow", "app")
+	requireNoError(t, os.MkdirAll(oldSource, 0o755))
+	token := filepath.Join(oldSource, "token")
+	if err := os.Link(protected, token); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+	nestedLink := filepath.Join(oldSource, "current-token")
+	requireNoError(t, os.Symlink(token, nestedLink))
+	target := filepath.Join(home, ".config", "app")
+	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+	requireNoError(t, os.Symlink(oldSource, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = svc.Add(target, "app")
+	requireErrorContains(t, err, "external hardlink")
+
+	assertSymlink(t, target, oldSource)
+	assertSymlink(t, nestedLink, token)
+	requireFileContent(t, protected, "token=keep\n")
+	tokenInfo, err := os.Stat(token)
+	requireNoError(t, err)
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	if !os.SameFile(tokenInfo, protectedInfo) {
+		t.Fatalf("failed add should not alter external hardlink topology")
+	}
+	requireNoPath(t, filepath.Join(repo, "app"))
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
+func TestAddInPlaceSymlinkAdoptionRefusesExternalHardlinkSource(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	svc, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	protected := filepath.Join(home, "protected-zshrc")
+	writeTextFile(t, protected, "export TOKEN=keep\n")
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	requireNoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+	if err := os.Link(protected, source); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+	target := filepath.Join(home, ".zshrc")
+	requireNoError(t, os.Symlink(source, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = svc.Add(target, "zsh")
+	requireErrorContains(t, err, "external hardlink")
+
+	assertSymlink(t, target, source)
+	requireFileContent(t, protected, "export TOKEN=keep\n")
+	sourceInfo, err := os.Stat(source)
+	requireNoError(t, err)
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	if !os.SameFile(sourceInfo, protectedInfo) {
+		t.Fatalf("failed add should not alter the repo hardlink source")
+	}
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
+func TestAddInPlaceSymlinkAdoptionRefusesSourceSymlinkResolvingToUnsupportedSpecialFile(
+	t *testing.T,
+) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	svc, err := InitRepo(repo, env)
+	requireNoError(t, err)
+
+	realSource := filepath.Join(repo, "pipes", "real.pipe")
+	requireNoError(t, os.MkdirAll(filepath.Dir(realSource), 0o755))
+	requireNoError(t, syscall.Mkfifo(realSource, 0o600))
+	sourceLink := filepath.Join(repo, "pipes", "app.pipe")
+	requireNoError(t, os.Symlink("real.pipe", sourceLink))
+	target := filepath.Join(home, ".config", "app.pipe")
+	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+	requireNoError(t, os.Symlink(sourceLink, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = svc.Add(target, "pipes")
+	requireErrorContains(t, err, "unsupported file type")
+
+	assertSymlink(t, target, sourceLink)
+	assertSymlink(t, sourceLink, "real.pipe")
+	info, err := os.Lstat(realSource)
+	requireNoError(t, err)
+	if info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("repo FIFO referent should remain unchanged, mode=%v", info.Mode())
+	}
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
 func TestAddAlreadyAdoptedTargetIsIdempotent(t *testing.T) {
 	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
@@ -168,6 +482,151 @@ func TestAddAlreadyAdoptedTargetIsIdempotent(t *testing.T) {
 	if got := len(manifest.Packages["zsh"].Links); got != 1 {
 		t.Fatalf("expected idempotent add to keep one Link Mapping, got %d", got)
 	}
+}
+
+func TestAddRejectsSymlinkToUnsupportedSpecialFileTargetWithoutMutation(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	_, err := InitRepo(repo, env)
+	requireNoError(t, err)
+	fifo := filepath.Join(home, "external-fifo")
+	requireNoError(t, syscall.Mkfifo(fifo, 0o600))
+	target := filepath.Join(home, ".config", "target")
+	requireNoError(t, os.Symlink(fifo, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = NewService(repo, env).Add(target, "pkg")
+	requireErrorContains(t, err, "unsupported file type")
+
+	assertSymlink(t, target, fifo)
+	info, err := os.Lstat(fifo)
+	requireNoError(t, err)
+	if info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("FIFO referent should remain unchanged, mode=%v", info.Mode())
+	}
+	requireNoPath(t, filepath.Join(repo, "pkg"))
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
+func TestAddRejectsUnsupportedSpecialFileTargetsWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name       string
+		setup      func(t *testing.T, target string)
+		assertSafe func(t *testing.T, target, repo string)
+	}{
+		{
+			name: "fifo target",
+			setup: func(t *testing.T, target string) {
+				t.Helper()
+				requireNoError(t, syscall.Mkfifo(target, 0o600))
+			},
+			assertSafe: func(t *testing.T, target, repo string) {
+				t.Helper()
+				info, err := os.Lstat(target)
+				requireNoError(t, err)
+				if info.Mode()&os.ModeNamedPipe == 0 {
+					t.Fatalf("target FIFO should remain unchanged, mode=%v", info.Mode())
+				}
+				requireNoPath(t, filepath.Join(repo, "pkg"))
+			},
+		},
+		{
+			name: "directory containing fifo",
+			setup: func(t *testing.T, target string) {
+				t.Helper()
+				writeTextFile(t, filepath.Join(target, "config"), "regular config\n")
+				requireNoError(t, syscall.Mkfifo(filepath.Join(target, "socket"), 0o600))
+			},
+			assertSafe: func(t *testing.T, target, repo string) {
+				t.Helper()
+				requireFileContent(t, filepath.Join(target, "config"), "regular config\n")
+				info, err := os.Lstat(filepath.Join(target, "socket"))
+				requireNoError(t, err)
+				if info.Mode()&os.ModeNamedPipe == 0 {
+					t.Fatalf("nested FIFO should remain unchanged, mode=%v", info.Mode())
+				}
+				requireNoPath(t, filepath.Join(repo, "pkg"))
+			},
+		},
+		{
+			name: "directory containing symlink to fifo",
+			setup: func(t *testing.T, target string) {
+				t.Helper()
+				fifo := filepath.Join(filepath.Dir(target), "external-fifo")
+				requireNoError(t, syscall.Mkfifo(fifo, 0o600))
+				writeTextFile(t, filepath.Join(target, "config"), "regular config\n")
+				requireNoError(t, os.Symlink(fifo, filepath.Join(target, "current.pipe")))
+			},
+			assertSafe: func(t *testing.T, target, repo string) {
+				t.Helper()
+				requireFileContent(t, filepath.Join(target, "config"), "regular config\n")
+				current := filepath.Join(target, "current.pipe")
+				fifo, err := os.Readlink(current)
+				requireNoError(t, err)
+				assertSymlink(t, current, fifo)
+				info, err := os.Lstat(fifo)
+				requireNoError(t, err)
+				if info.Mode()&os.ModeNamedPipe == 0 {
+					t.Fatalf("symlink FIFO referent should remain unchanged, mode=%v", info.Mode())
+				}
+				requireNoPath(t, filepath.Join(repo, "pkg"))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home, env := setupHome(t)
+			repo := filepath.Join(home, "dotfiles")
+			_, err := InitRepo(repo, env)
+			requireNoError(t, err)
+			target := filepath.Join(home, ".config", "target")
+			tt.setup(t, target)
+			manifestBefore, err := os.ReadFile(ManifestPath(repo))
+			requireNoError(t, err)
+
+			_, err = NewService(repo, env).Add(target, "pkg")
+			requireErrorContains(t, err, "unsupported file type")
+
+			tt.assertSafe(t, target, repo)
+			requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+		})
+	}
+}
+
+func TestAddRejectsDirectoryContainingSymlinkToExternalHardlinkWithoutMutation(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	_, err := InitRepo(repo, env)
+	requireNoError(t, err)
+	protected := filepath.Join(home, "protected-token")
+	externalAlias := filepath.Join(home, "external-token")
+	writeTextFile(t, protected, "token=keep\n")
+	if err := os.Link(protected, externalAlias); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+	target := filepath.Join(home, ".config", "target")
+	writeTextFile(t, filepath.Join(target, "config"), "regular config\n")
+	requireNoError(t, os.Symlink(externalAlias, filepath.Join(target, "current-token")))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = NewService(repo, env).Add(target, "pkg")
+	requireErrorContains(t, err, "external hardlink")
+
+	requireFileContent(t, filepath.Join(target, "config"), "regular config\n")
+	assertSymlink(t, filepath.Join(target, "current-token"), externalAlias)
+	requireFileContent(t, protected, "token=keep\n")
+	aliasInfo, err := os.Stat(externalAlias)
+	requireNoError(t, err)
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	if !os.SameFile(aliasInfo, protectedInfo) {
+		t.Fatalf("failed add should not alter external hardlink alias")
+	}
+	requireNoPath(t, filepath.Join(repo, "pkg"))
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 }
 
 func TestAddRejectsMissingTargetWithoutChangingManifestOrRepository(t *testing.T) {
@@ -371,6 +830,33 @@ func TestAddRejectsSymlinkedTargetParentInsideRepositoryWithoutMutation(t *testi
 	requireNoPath(t, filepath.Join(repo, "pkg"))
 }
 
+func TestAddDryRunRejectsSymlinkedTargetParentWithoutPlanningReferentAdoption(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	_, err := InitRepo(repo, env)
+	requireNoError(t, err)
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+	externalParent := filepath.Join(filepath.Dir(home), "external-config")
+	requireNoError(t, os.MkdirAll(externalParent, 0o755))
+	writeTextFile(t, filepath.Join(externalParent, "config"), "external config\n")
+	targetParent := filepath.Join(home, ".config")
+	requireNoError(t, os.RemoveAll(targetParent))
+	requireNoError(t, os.Symlink(externalParent, targetParent))
+	target := filepath.Join(targetParent, "config")
+
+	_, err = NewService(repo, env).AddWithOptions(AddOptions{
+		Target:  target,
+		Package: "app",
+		DryRun:  true,
+	})
+	requireErrorContains(t, err, "Target Path")
+	assertSymlink(t, targetParent, externalParent)
+	requireFileContent(t, filepath.Join(externalParent, "config"), "external config\n")
+	requireNoPath(t, filepath.Join(repo, "app"))
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
 func TestAddDryRunValidatesAndDoesNotMoveLinkOrWriteManifest(t *testing.T) {
 	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
@@ -498,6 +984,177 @@ func TestAddRefusesSymlinkedPackageSourceEscapingRepository(t *testing.T) {
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 }
 
+func TestLinkRefusesUnsupportedSpecialFilePackageSource(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.pipes]
+links = [
+  { source = "app.pipe", target = "~/.config/app.pipe" },
+]
+`)
+	source := filepath.Join(repo, "pipes", "app.pipe")
+	requireNoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+	requireNoError(t, syscall.Mkfifo(source, 0o600))
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"pipes"}})
+	requireErrorContains(t, err, "unsupported file type")
+
+	requireNoPath(t, filepath.Join(home, ".config", "app.pipe"))
+	info, err := os.Lstat(source)
+	requireNoError(t, err)
+	if info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("repo FIFO Package Source should remain unchanged, mode=%v", info.Mode())
+	}
+}
+
+func TestLinkRefusesDirectorySourceWithNestedSymlinkResolvingToUnsupportedSpecialFile(
+	t *testing.T,
+) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "~/.config/app" },
+]
+`)
+	realSource := filepath.Join(repo, "app", "pipes", "real.pipe")
+	requireNoError(t, os.MkdirAll(filepath.Dir(realSource), 0o755))
+	requireNoError(t, syscall.Mkfifo(realSource, 0o600))
+	sourceDir := filepath.Join(repo, "app", "config")
+	requireNoError(t, os.MkdirAll(sourceDir, 0o755))
+	nestedLink := filepath.Join(sourceDir, "current.pipe")
+	requireNoError(t, os.Symlink("../pipes/real.pipe", nestedLink))
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"app"}})
+	requireErrorContains(t, err, "unsupported file type")
+
+	requireNoPath(t, filepath.Join(home, ".config", "app"))
+	assertSymlink(t, nestedLink, "../pipes/real.pipe")
+	info, err := os.Lstat(realSource)
+	requireNoError(t, err)
+	if info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("repo FIFO referent should remain unchanged, mode=%v", info.Mode())
+	}
+}
+
+func TestLinkRefusesDirectorySourceWithNestedSymlinkResolvingToExternalHardlink(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "~/.config/app" },
+]
+`)
+	protected := filepath.Join(home, "protected-token")
+	writeTextFile(t, protected, "token=keep\n")
+	realSource := filepath.Join(repo, "app", "shared", "token")
+	requireNoError(t, os.MkdirAll(filepath.Dir(realSource), 0o755))
+	if err := os.Link(protected, realSource); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+	sourceDir := filepath.Join(repo, "app", "config")
+	requireNoError(t, os.MkdirAll(sourceDir, 0o755))
+	nestedLink := filepath.Join(sourceDir, "current-token")
+	requireNoError(t, os.Symlink("../shared/token", nestedLink))
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"app"}})
+	requireErrorContains(t, err, "external hardlink")
+
+	requireNoPath(t, filepath.Join(home, ".config", "app"))
+	assertSymlink(t, nestedLink, "../shared/token")
+	requireFileContent(t, protected, "token=keep\n")
+	realInfo, err := os.Stat(realSource)
+	requireNoError(t, err)
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	if !os.SameFile(realInfo, protectedInfo) {
+		t.Fatalf("failed link should not alter the repo hardlink referent")
+	}
+}
+
+func TestLinkRefusesSourceSymlinkResolvingToUnsupportedSpecialFile(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.pipes]
+links = [
+  { source = "current.pipe", target = "~/.config/app.pipe" },
+]
+`)
+	realSource := filepath.Join(repo, "pipes", "real.pipe")
+	requireNoError(t, os.MkdirAll(filepath.Dir(realSource), 0o755))
+	requireNoError(t, syscall.Mkfifo(realSource, 0o600))
+	sourceLink := filepath.Join(repo, "pipes", "current.pipe")
+	requireNoError(t, os.Symlink("real.pipe", sourceLink))
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"pipes"}})
+	requireErrorContains(t, err, "unsupported file type")
+
+	requireNoPath(t, filepath.Join(home, ".config", "app.pipe"))
+	assertSymlink(t, sourceLink, "real.pipe")
+	info, err := os.Lstat(realSource)
+	requireNoError(t, err)
+	if info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("repo FIFO referent should remain unchanged, mode=%v", info.Mode())
+	}
+}
+
+func TestLinkRefusesPackageSourceHardlinkedToExternalFile(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
+	protected := filepath.Join(home, "protected-zshrc")
+	writeTextFile(t, protected, "export TOKEN=keep\n")
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	requireNoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+	if err := os.Link(protected, source); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"zsh"}})
+	requireErrorContains(t, err, "external hardlink")
+
+	requireNoPath(t, filepath.Join(home, ".zshrc"))
+	requireFileContent(t, protected, "export TOKEN=keep\n")
+	sourceInfo, err := os.Stat(source)
+	requireNoError(t, err)
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	if !os.SameFile(sourceInfo, protectedInfo) {
+		t.Fatalf("failed link should not alter the repo hardlink source")
+	}
+}
+
+func TestLinkRefusesSourceSymlinkResolvingToExternalHardlink(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = "current-zshrc", target = "~/.zshrc" },
+]
+`)
+	protected := filepath.Join(home, "protected-zshrc")
+	writeTextFile(t, protected, "export TOKEN=keep\n")
+	realSource := filepath.Join(repo, "zsh", "real-zshrc")
+	requireNoError(t, os.MkdirAll(filepath.Dir(realSource), 0o755))
+	if err := os.Link(protected, realSource); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+	sourceLink := filepath.Join(repo, "zsh", "current-zshrc")
+	requireNoError(t, os.Symlink("real-zshrc", sourceLink))
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"zsh"}})
+	requireErrorContains(t, err, "external hardlink")
+
+	requireNoPath(t, filepath.Join(home, ".zshrc"))
+	assertSymlink(t, sourceLink, "real-zshrc")
+	requireFileContent(t, protected, "export TOKEN=keep\n")
+	realInfo, err := os.Stat(realSource)
+	requireNoError(t, err)
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	if !os.SameFile(realInfo, protectedInfo) {
+		t.Fatalf("failed link should not alter the repo hardlink referent")
+	}
+}
+
 func TestLinkRefusesTargetConflictUnlessForced(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
@@ -574,6 +1231,89 @@ func TestLinkRejectsDangerousTargetPathsEvenWhenForced(t *testing.T) {
 			tt.assertSafe(t, home, repo, target)
 		})
 	}
+}
+
+func TestLinkRejectsAbsoluteTargetWithSymlinkedParent(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "PLACEHOLDER" },
+]
+`)
+	source := filepath.Join(repo, "app", "config")
+	writeTextFile(t, source, "managed config\n")
+	externalParent := filepath.Join(filepath.Dir(home), "external-absolute-target")
+	targetParent := filepath.Join(filepath.Dir(home), "absolute-target-parent")
+	requireNoError(t, os.MkdirAll(externalParent, 0o755))
+	requireNoError(t, os.Symlink(externalParent, targetParent))
+	target := filepath.Join(targetParent, "config")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "`+filepath.ToSlash(target)+`" },
+]
+`)
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"app"}})
+	requireErrorContains(t, err, "Target Path")
+	assertSymlink(t, targetParent, externalParent)
+	requireNoPath(t, filepath.Join(externalParent, "config"))
+	requireFileContent(t, source, "managed config\n")
+}
+
+func TestLinkRejectsAbsoluteTargetWithSymlinkedAncestor(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "PLACEHOLDER" },
+]
+`)
+	source := filepath.Join(repo, "app", "config")
+	writeTextFile(t, source, "managed config\n")
+	externalRoot := filepath.Join(filepath.Dir(home), "external-absolute-root")
+	targetRoot := filepath.Join(filepath.Dir(home), "absolute-target-root")
+	referentTargetParent := filepath.Join(externalRoot, "nested")
+	requireNoError(t, os.MkdirAll(referentTargetParent, 0o755))
+	requireNoError(t, os.Symlink(externalRoot, targetRoot))
+	target := filepath.Join(targetRoot, "nested", "config")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "`+filepath.ToSlash(target)+`" },
+]
+`)
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"app"}})
+	requireErrorContains(t, err, "Target Path")
+	assertSymlink(t, targetRoot, externalRoot)
+	requireNoPath(t, filepath.Join(referentTargetParent, "config"))
+	requireFileContent(t, source, "managed config\n")
+}
+
+func TestLinkDryRunRejectsSymlinkedTargetParent(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "~/.config/config" },
+]
+`)
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "app"), 0o755))
+	writeTextFile(t, filepath.Join(repo, "app", "config"), "managed config\n")
+	externalParent := filepath.Join(home, "external-config")
+	requireNoError(t, os.MkdirAll(externalParent, 0o755))
+	requireNoError(t, os.RemoveAll(filepath.Join(home, ".config")))
+	requireNoError(t, os.Symlink(externalParent, filepath.Join(home, ".config")))
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"app"}, DryRun: true})
+	requireErrorContains(t, err, "Target Path")
+	assertSymlink(t, filepath.Join(home, ".config"), externalParent)
+	requireNoPath(t, filepath.Join(externalParent, "config"))
+	requireFileContent(t, filepath.Join(repo, "app", "config"), "managed config\n")
 }
 
 func TestLinkRejectsSymlinkedTargetParentInsideRepositoryEvenWhenForced(t *testing.T) {
@@ -1157,6 +1897,169 @@ links = [
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 }
 
+func TestSoftUnlinkPrevalidatesNestedSymlinkReferentBeforeRemovingLink(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "~/.config/app" },
+]
+`)
+	realSource := filepath.Join(repo, "app", "pipes", "real.pipe")
+	requireNoError(t, os.MkdirAll(filepath.Dir(realSource), 0o755))
+	requireNoError(t, syscall.Mkfifo(realSource, 0o600))
+	source := filepath.Join(repo, "app", "config")
+	requireNoError(t, os.MkdirAll(source, 0o755))
+	writeTextFile(t, filepath.Join(source, "app.conf"), "regular config\n")
+	nestedLink := filepath.Join(source, "current.pipe")
+	requireNoError(t, os.Symlink("../pipes/real.pipe", nestedLink))
+	target := filepath.Join(home, ".config", "app")
+	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+	requireNoError(t, os.Symlink(source, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}})
+	requireErrorContains(t, err, "unsupported file type")
+
+	assertSymlink(t, target, source)
+	assertSymlink(t, nestedLink, "../pipes/real.pipe")
+	info, err := os.Lstat(realSource)
+	requireNoError(t, err)
+	if info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("repo FIFO referent should remain unchanged, mode=%v", info.Mode())
+	}
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
+func TestSoftUnlinkAllowsInternalSymlinkToHardlinkedFileAndBreaksTargetAlias(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "~/.config/app" },
+]
+`)
+	protected := filepath.Join(home, "protected-token")
+	writeTextFile(t, protected, "token=keep\n")
+	source := filepath.Join(repo, "app", "config")
+	requireNoError(t, os.MkdirAll(source, 0o755))
+	token := filepath.Join(source, "token")
+	if err := os.Link(protected, token); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+	nestedLink := filepath.Join(source, "current-token")
+	requireNoError(t, os.Symlink("token", nestedLink))
+	target := filepath.Join(home, ".config", "app")
+	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+	requireNoError(t, os.Symlink(source, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}})
+	requireNoError(t, err)
+
+	targetToken := filepath.Join(target, "token")
+	requireFileContent(t, targetToken, "token=keep\n")
+	assertSymlink(t, filepath.Join(target, "current-token"), "token")
+	requireFileContent(t, protected, "token=keep\n")
+	targetInfo, err := os.Stat(targetToken)
+	requireNoError(t, err)
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	if os.SameFile(targetInfo, protectedInfo) {
+		t.Fatalf("soft unlink target copy should break external hardlink alias")
+	}
+	repoInfo, err := os.Stat(token)
+	requireNoError(t, err)
+	if !os.SameFile(repoInfo, protectedInfo) {
+		t.Fatalf("soft unlink should not rewrite the repo Package Source hardlink")
+	}
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
+func TestSoftUnlinkPrevalidatesNestedSymlinkReferentHardlinksBeforeRemovingLink(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "~/.config/app" },
+]
+`)
+	protected := filepath.Join(home, "protected-token")
+	writeTextFile(t, protected, "token=keep\n")
+	realSource := filepath.Join(repo, "app", "shared", "token")
+	requireNoError(t, os.MkdirAll(filepath.Dir(realSource), 0o755))
+	if err := os.Link(protected, realSource); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+	source := filepath.Join(repo, "app", "config")
+	requireNoError(t, os.MkdirAll(source, 0o755))
+	writeTextFile(t, filepath.Join(source, "app.conf"), "regular config\n")
+	nestedLink := filepath.Join(source, "current-token")
+	requireNoError(t, os.Symlink("../shared/token", nestedLink))
+	target := filepath.Join(home, ".config", "app")
+	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+	requireNoError(t, os.Symlink(source, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}})
+	requireErrorContains(t, err, "external hardlink")
+
+	assertSymlink(t, target, source)
+	assertSymlink(t, nestedLink, "../shared/token")
+	requireFileContent(t, protected, "token=keep\n")
+	realInfo, err := os.Stat(realSource)
+	requireNoError(t, err)
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	if !os.SameFile(realInfo, protectedInfo) {
+		t.Fatalf("failed unlink should not alter the repo hardlink referent")
+	}
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
+func TestSoftUnlinkRejectsAbsoluteInternalSymlinkToExternalHardlinkReferent(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "~/.config/app" },
+]
+`)
+	protected := filepath.Join(home, "protected-token")
+	writeTextFile(t, protected, "token=keep\n")
+	source := filepath.Join(repo, "app", "config")
+	requireNoError(t, os.MkdirAll(source, 0o755))
+	token := filepath.Join(source, "token")
+	if err := os.Link(protected, token); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+	nestedLink := filepath.Join(source, "current-token")
+	requireNoError(t, os.Symlink(token, nestedLink))
+	target := filepath.Join(home, ".config", "app")
+	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+	requireNoError(t, os.Symlink(source, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}})
+	requireErrorContains(t, err, "external hardlink")
+
+	assertSymlink(t, target, source)
+	assertSymlink(t, nestedLink, token)
+	requireFileContent(t, protected, "token=keep\n")
+	tokenInfo, err := os.Stat(token)
+	requireNoError(t, err)
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	if !os.SameFile(tokenInfo, protectedInfo) {
+		t.Fatalf("failed unlink should not alter repo hardlink topology")
+	}
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
 func TestSoftUnlinkLeavesTargetCopyAsConflictForStatusAndPlainLink(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
@@ -1179,6 +2082,43 @@ func TestSoftUnlinkLeavesTargetCopyAsConflictForStatusAndPlainLink(t *testing.T)
 	requireErrorContains(t, err, "already exists")
 	requireFileContent(t, target, "export EDITOR=vim\n")
 	assertZshPackageState(t, svc, StateConflict)
+}
+
+func TestSoftUnlinkMaterializesTopLevelSourceSymlinkReferent(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.zsh]
+links = [
+  { source = "current-zshrc", target = "~/.zshrc" },
+]
+`)
+	realSource := filepath.Join(repo, "zsh", "real-zshrc")
+	linkSource := filepath.Join(repo, "zsh", "current-zshrc")
+	writeTextFile(t, realSource, "source inside package\n")
+	rel, err := filepath.Rel(filepath.Dir(linkSource), realSource)
+	requireNoError(t, err)
+	requireNoError(t, os.Symlink(rel, linkSource))
+	target := filepath.Join(home, ".zshrc")
+	svc := NewService(repo, env)
+
+	_, err = svc.Link(LinkOptions{Packages: []string{"zsh"}})
+	requireNoError(t, err)
+	assertSymlink(t, target, linkSource)
+
+	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	requireNoError(t, err)
+
+	info, err := os.Lstat(target)
+	requireNoError(t, err)
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf(
+			"soft unlink should materialize source symlink referent, got symlink at %s",
+			target,
+		)
+	}
+	requireFileContent(t, target, "source inside package\n")
+	assertSymlink(t, linkSource, rel)
+	requireFileContent(t, realSource, "source inside package\n")
 }
 
 func TestHardUnlinkWithMissingSourceOnlyRemovesExpectedLinks(t *testing.T) {
@@ -1259,6 +2199,80 @@ func TestHardUnlinkWithMissingSourceOnlyRemovesExpectedLinks(t *testing.T) {
 			requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 		})
 	}
+}
+
+func TestHardUnlinkDryRunRejectsAbsentTargetUnderSymlinkedParent(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "~/.config/config" },
+]
+`)
+	source := filepath.Join(repo, "app", "config")
+	writeTextFile(t, source, "managed config\n")
+	externalParent := filepath.Join(filepath.Dir(home), "external-config")
+	requireNoError(t, os.MkdirAll(externalParent, 0o755))
+	targetParent := filepath.Join(home, ".config")
+	requireNoError(t, os.RemoveAll(targetParent))
+	requireNoError(t, os.Symlink(externalParent, targetParent))
+
+	_, err := NewService(repo, env).Unlink(UnlinkOptions{
+		Packages: []string{"app"},
+		Hard:     true,
+		DryRun:   true,
+	})
+	requireErrorContains(t, err, "Target Path")
+	assertSymlink(t, targetParent, externalParent)
+	requireNoPath(t, filepath.Join(externalParent, "config"))
+	requireFileContent(t, source, "managed config\n")
+}
+
+func TestHardUnlinkRejectsSymlinkedTargetParentWithoutRemovingReferentLink(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "~/.config/config" },
+]
+`)
+	source := filepath.Join(repo, "app", "config")
+	writeTextFile(t, source, "managed config\n")
+	externalParent := filepath.Join(filepath.Dir(home), "external-config")
+	requireNoError(t, os.MkdirAll(externalParent, 0o755))
+	targetParent := filepath.Join(home, ".config")
+	requireNoError(t, os.RemoveAll(targetParent))
+	requireNoError(t, os.Symlink(externalParent, targetParent))
+	referentLink := filepath.Join(externalParent, "config")
+	requireNoError(t, os.Symlink(source, referentLink))
+
+	_, err := NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}, Hard: true})
+	requireErrorContains(t, err, "Target Path")
+	assertSymlink(t, targetParent, externalParent)
+	assertSymlink(t, referentLink, source)
+	requireFileContent(t, source, "managed config\n")
+}
+
+func TestHardUnlinkWithBrokenPackageSourceSymlinkOnlyRemovesExpectedLink(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	missing := filepath.Join(home, "missing-zshrc")
+	requireNoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+	requireNoError(t, os.Symlink(missing, source))
+	target := filepath.Join(home, ".zshrc")
+	requireNoError(t, os.Symlink(source, target))
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{
+		Packages: []string{"zsh"},
+		Hard:     true,
+	})
+	requireNoError(t, err)
+
+	requireNoPath(t, target)
+	assertSymlink(t, source, missing)
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 }
 
 func TestSoftUnlinkRollsBackRemovedLinkWhenCopyFailsDuringExecution(t *testing.T) {
@@ -1363,6 +2377,131 @@ func TestUnlinkReportsRollbackFailure(t *testing.T) {
 
 	requireNoPath(t, target)
 	requireFileContent(t, source, "export EDITOR=vim\n")
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+}
+
+func TestMapRefusesSymlinkedManifestWithoutReplacingIt(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "zsh"), 0o755))
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
+	externalManifest := filepath.Join(home, "external-dotty.toml")
+	writeTextFile(t, externalManifest, `version = 1
+
+[packages.zsh]
+links = []
+`)
+	requireNoError(t, os.Symlink(externalManifest, ManifestPath(repo)))
+
+	_, err := NewService(repo, env).Map(MapOptions{
+		Package: "zsh",
+		Source:  ".zshrc",
+		Target:  "~/.zshrc",
+	})
+	requireErrorContains(t, err, "refuse to replace symlink")
+
+	assertSymlink(t, ManifestPath(repo), externalManifest)
+	requireFileContent(t, externalManifest, `version = 1
+
+[packages.zsh]
+links = []
+`)
+	requireNoPath(t, filepath.Join(home, ".zshrc"))
+}
+
+func TestMapRefusesUnsupportedSpecialFilePackageSource(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	source := filepath.Join(repo, "pipes", "app.pipe")
+	requireNoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+	requireNoError(t, syscall.Mkfifo(source, 0o600))
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.pipes]
+links = []
+`)
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = NewService(repo, env).Map(MapOptions{
+		Package: "pipes",
+		Source:  "app.pipe",
+		Target:  "~/.config/app.pipe",
+	})
+	requireErrorContains(t, err, "unsupported file type")
+
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+	requireNoPath(t, filepath.Join(home, ".config", "app.pipe"))
+	info, err := os.Lstat(source)
+	requireNoError(t, err)
+	if info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("repo FIFO Package Source should remain unchanged, mode=%v", info.Mode())
+	}
+}
+
+func TestMapRefusesPackageSourceHardlinkedToExternalFile(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "zsh"), 0o755))
+	protected := filepath.Join(home, "protected-zshrc")
+	writeTextFile(t, protected, "export TOKEN=keep\n")
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	if err := os.Link(protected, source); err != nil {
+		t.Skipf("hardlinks are not supported in test filesystem: %v", err)
+	}
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = []
+`)
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+
+	_, err = NewService(repo, env).Map(MapOptions{
+		Package: "zsh",
+		Source:  ".zshrc",
+		Target:  "~/.zshrc",
+	})
+	requireErrorContains(t, err, "external hardlink")
+
+	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
+	requireNoPath(t, filepath.Join(home, ".zshrc"))
+	sourceInfo, err := os.Stat(source)
+	requireNoError(t, err)
+	protectedInfo, err := os.Stat(protected)
+	requireNoError(t, err)
+	if !os.SameFile(sourceInfo, protectedInfo) {
+		t.Fatalf("failed map should not alter the repo hardlink source")
+	}
+}
+
+func TestMapRejectsSymlinkedTargetParentWithoutWritingManifest(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "app"), 0o755))
+	writeTextFile(t, filepath.Join(repo, "app", "config"), "managed config\n")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.app]
+links = []
+`)
+	manifestBefore, err := os.ReadFile(ManifestPath(repo))
+	requireNoError(t, err)
+	externalParent := filepath.Join(home, "external-config")
+	requireNoError(t, os.MkdirAll(externalParent, 0o755))
+	requireNoError(t, os.RemoveAll(filepath.Join(home, ".config")))
+	requireNoError(t, os.Symlink(externalParent, filepath.Join(home, ".config")))
+
+	_, err = NewService(repo, env).Map(MapOptions{
+		Package: "app",
+		Source:  "config",
+		Target:  "~/.config/config",
+	})
+	requireErrorContains(t, err, "Target Path")
+
+	assertSymlink(t, filepath.Join(home, ".config"), externalParent)
+	requireNoPath(t, filepath.Join(externalParent, "config"))
+	requireFileContent(t, filepath.Join(repo, "app", "config"), "managed config\n")
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 }
 

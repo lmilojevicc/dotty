@@ -55,6 +55,18 @@ func PackageRoot(repo, packageName string) string {
 }
 
 func PackageSourcePath(repo, packageName, source string) (string, error) {
+	joined, err := packageSourcePathLexical(repo, packageName, source)
+	if err != nil {
+		return "", err
+	}
+	root := PackageRoot(repo, packageName)
+	if !resolvedSourceStaysWithinPackage(repo, root, joined) {
+		return "", fmt.Errorf("source %q escapes package %q", source, packageName)
+	}
+	return joined, nil
+}
+
+func packageSourcePathLexical(repo, packageName, source string) (string, error) {
 	if err := validateSourcePath(source); err != nil {
 		return "", err
 	}
@@ -63,7 +75,7 @@ func PackageSourcePath(repo, packageName, source string) (string, error) {
 	if source != "." {
 		joined = filepath.Clean(filepath.Join(root, filepath.FromSlash(source)))
 	}
-	if !isWithin(root, joined) || !resolvedSourceStaysWithinPackage(repo, root, joined) {
+	if !isWithin(root, joined) {
 		return "", fmt.Errorf("source %q escapes package %q", source, packageName)
 	}
 	return joined, nil

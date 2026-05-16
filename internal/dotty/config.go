@@ -9,7 +9,7 @@ import (
 
 func LoadConfig(env Env) (*Config, error) {
 	path := env.ConfigFilePath()
-	data, err := os.ReadFile(path)
+	data, err := readRegularFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Config{}, nil

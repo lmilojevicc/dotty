@@ -44,12 +44,27 @@ func WriteFileTx(tx *Tx, path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	var previous []byte
+	previousPerm := perm
 	existed := false
-	if current, err := os.ReadFile(path); err == nil {
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf(
+				"refuse to replace symlink %s (replace it with a regular file or edit its target directly)",
+				path,
+			)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("existing file %s is not a regular file", path)
+		}
+		previousPerm = info.Mode().Perm()
+		current, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read existing file %s: %w", path, err)
+		}
 		existed = true
 		previous = current
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("read existing file %s: %w", path, err)
+		return fmt.Errorf("inspect existing file %s: %w", path, err)
 	}
 
 	tmp, err := os.CreateTemp(dirOf(path), ".dotty-write-*")
@@ -80,10 +95,51 @@ func WriteFileTx(tx *Tx, path string, data []byte, perm os.FileMode) error {
 
 	tx.AddRollback(func() error {
 		if existed {
-			return os.WriteFile(path, previous, perm)
+			return restoreRegularFileNoFollow(path, previous, previousPerm)
 		}
 		return removePath(path)
 	})
+	return nil
+}
+
+func restoreRegularFileNoFollow(path string, data []byte, perm os.FileMode) error {
+	info, err := os.Lstat(path)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			if err := removePath(path); err != nil {
+				return err
+			}
+		} else if !info.Mode().IsRegular() {
+			return fmt.Errorf("refuse to restore %s over non-regular path", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect rollback path %s: %w", path, err)
+	}
+	tmp, err := os.CreateTemp(dirOf(path), ".dotty-rollback-*")
+	if err != nil {
+		return fmt.Errorf("create rollback temporary file for %s: %w", path, err)
+	}
+	tmpName := tmp.Name()
+	cleanupTemp := true
+	defer func() {
+		_ = tmp.Close()
+		if cleanupTemp {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("write rollback temporary file for %s: %w", path, err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		return fmt.Errorf("chmod rollback temporary file for %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close rollback temporary file for %s: %w", path, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("restore %s: %w", path, err)
+	}
+	cleanupTemp = false
 	return nil
 }
 
@@ -97,6 +153,16 @@ func MovePathTx(tx *Tx, src, dst string) error {
 	tx.AddRollback(func() error {
 		return restoreMovedPathWithFallback(dst, src)
 	})
+	return nil
+}
+
+func CopyPathAndMoveAsideSourceTx(tx *Tx, src, dst string) error {
+	if err := CopyPathTx(tx, src, dst); err != nil {
+		return err
+	}
+	if err := MoveAsideTx(tx, src); err != nil {
+		return err
+	}
 	return nil
 }
 

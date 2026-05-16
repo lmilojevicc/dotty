@@ -7,6 +7,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestRunAtomicRollsBackInReverseOrderAndReportsRollbackFailure(t *testing.T) {
@@ -34,6 +35,7 @@ func TestWriteFileTxRestoresPreviousFilesAndRemovesNewFilesOnRollback(t *testing
 	existing := filepath.Join(dir, "existing.txt")
 	created := filepath.Join(dir, "nested", "created.txt")
 	writeTextFile(t, existing, "old\n")
+	requireNoError(t, os.Chmod(existing, 0o600))
 
 	err := RunAtomic(func(tx *Tx) error {
 		requireNoError(t, WriteFileTx(tx, existing, []byte("new\n"), 0o644))
@@ -43,8 +45,63 @@ func TestWriteFileTxRestoresPreviousFilesAndRemovesNewFilesOnRollback(t *testing
 	requireErrorContains(t, err, "stop")
 
 	requireFileContent(t, existing, "old\n")
+	info, err := os.Stat(existing)
+	requireNoError(t, err)
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("rollback should restore previous mode 0600, got %04o", got)
+	}
 	requireNoPath(t, created)
 	requireNoPath(t, filepath.Dir(created))
+}
+
+func TestWriteFileTxRejectsNonRegularExistingDestinationWithoutBlocking(t *testing.T) {
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "dotty.toml")
+	requireNoError(t, syscall.Mkfifo(fifo, 0o600))
+
+	done := make(chan error, 1)
+	go func() {
+		done <- RunAtomic(func(tx *Tx) error {
+			return WriteFileTx(tx, fifo, []byte("version = 1\n"), 0o644)
+		})
+	}()
+
+	select {
+	case err := <-done:
+		requireErrorContains(t, err, "not a regular file")
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("WriteFileTx blocked on existing FIFO instead of rejecting it")
+	}
+
+	info, err := os.Lstat(fifo)
+	requireNoError(t, err)
+	if info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("expected FIFO to remain unchanged, mode=%v", info.Mode())
+	}
+}
+
+func TestWriteFileTxRollbackDoesNotFollowSymlinkSwappedAtPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.toml")
+	protected := filepath.Join(dir, "protected.txt")
+	writeTextFile(t, path, "old state\n")
+	writeTextFile(t, protected, "protected content\n")
+
+	err := RunAtomic(func(tx *Tx) error {
+		requireNoError(t, WriteFileTx(tx, path, []byte("new state\n"), 0o644))
+		requireNoError(t, os.Remove(path))
+		requireNoError(t, os.Symlink(protected, path))
+		return errors.New("stop")
+	})
+	requireErrorContains(t, err, "stop")
+
+	requireFileContent(t, protected, "protected content\n")
+	info, err := os.Lstat(path)
+	requireNoError(t, err)
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("rollback should restore a regular file without following swapped symlink")
+	}
+	requireFileContent(t, path, "old state\n")
 }
 
 func TestMoveAsideTxRestoresOnRollbackAndCleansBackupOnCommit(t *testing.T) {
