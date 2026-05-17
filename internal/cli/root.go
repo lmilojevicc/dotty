@@ -75,6 +75,15 @@ func (a *app) versionCommand() *cobra.Command {
 	}
 }
 
+func containsStatusState(states []dotty.State, want dotty.State) bool {
+	for _, state := range states {
+		if state == want {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *app) initCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:               "init [<path>]",
@@ -301,9 +310,11 @@ func (a *app) statusCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			stateUntrackedSelected := containsStatusState(parsedStates, dotty.StateUntracked)
 			report = dotty.FilterStatusReport(report, parsedStates)
-			effectiveVerbose := verbose || len(args) == 1
-			if len(args) > 0 {
+			effectiveVerbose := verbose || len(args) == 1 ||
+				(len(args) > 0 && stateUntrackedSelected)
+			if len(args) > 1 && !verbose && !stateUntrackedSelected {
 				report.Untracked = nil
 			}
 			renderStatus(a.out, report, effectiveVerbose)

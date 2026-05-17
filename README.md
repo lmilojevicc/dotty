@@ -149,7 +149,7 @@ Use `--target <target>` with `dotty link` or `dotty unlink` to narrow a Package,
 
 All commands accept the global `--repo` flag when they need to operate on a specific Dotfiles Repository.
 
-`dotty status` prints the resolved Dotfiles Repository, package states, untracked repository content, and a summary count. Use `--state <state>` to keep aggregate Package rows and untracked rows that match a state. Supported values are `linked`, `unlinked`, `partial`, `conflict`, `missing-source`, `empty`, and `untracked`. Use `dotty status --verbose` or `dotty status -v` for per-Link Mapping status. A single package argument, such as `dotty status tmux`, implies verbose per-Link Mapping output for that Package. Package-scoped status does not include repository-wide Untracked Repository Content.
+`dotty status` prints the resolved Dotfiles Repository, package states, untracked repository content, and a summary count. With no package arguments, it shows package summary rows plus all Untracked Repository Content discovered in the Dotfiles Repository. Package-scoped status only scans the selected Package Roots for untracked content, so top-level repository entries and unselected Packages do not leak into the result. Use `--state <state>` to keep aggregate Package rows and untracked rows that match a state. Supported values are `linked`, `unlinked`, `partial`, `conflict`, `missing-source`, `empty`, and `untracked`. Use `dotty status --verbose` or `dotty status -v` for per-Link Mapping status. A single package argument, such as `dotty status tmux`, implies verbose per-Link Mapping output for that Package and includes untracked content inside that Package Root as rows whose Target Path is `-`. Multi-package status remains aggregate-only by default; use `--verbose` or `--state untracked` to show selected package-local untracked details.
 
 ## Status States
 
@@ -161,7 +161,7 @@ Dotty renders status labels in uppercase, while `--state` accepts lowercase or k
 - `CONFLICT` (`--state conflict`): the Target Path exists as non-symlink content or points to another source.
 - `MISSING SOURCE` (`--state missing-source`): the Manifest references a Package Source that does not exist.
 - `EMPTY` (`--state empty`): the Package has no Link Mappings.
-- `UNTRACKED` (`--state untracked`): untracked repository content is not represented in the Manifest.
+- `UNTRACKED` (`--state untracked`): repository content or selected package-local content is not represented in the Manifest.
 
 ## Advanced
 

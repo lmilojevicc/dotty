@@ -453,7 +453,82 @@ links = [
 	}
 }
 
-func TestStatusPackageFilterRepeatsAndKeepsRepositoryUntrackedContent(t *testing.T) {
+func TestStatusPackageFilterReportsOnlySelectedPackageUntrackedContent(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(repo, 0o755))
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.nvim]
+links = [
+  { source = "init.lua", target = "~/.config/nvim/init.lua" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "nvim", "init.lua"), "vim.opt.nu = true\n")
+	writeTextFile(t, filepath.Join(repo, "nvim", "after", "plugin.lua"), "unselected\n")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux"), 0o755))
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "source ~/.zprofile\n")
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zprofile"), "export PATH\n")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "ghostty"), 0o755))
+
+	report, err := NewService(repo, env).Status([]string{"zsh"})
+	requireNoError(t, err)
+
+	gotPackages := make([]string, 0, len(report.Packages))
+	for _, pkg := range report.Packages {
+		gotPackages = append(gotPackages, pkg.Name)
+	}
+	requireEqualStrings(t, gotPackages, []string{"zsh"})
+
+	gotUntracked := make([]string, 0, len(report.Untracked))
+	for _, item := range report.Untracked {
+		gotUntracked = append(gotUntracked, item.Path)
+	}
+	requireEqualStrings(t, gotUntracked, []string{"zsh/.zprofile"})
+	requireUntrackedItemLocation(t, report.Untracked[0], "zsh", ".zprofile")
+}
+
+func TestStatusPackageFilterRepeatsWithoutDuplicatingPackageUntrackedContent(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	requireNoError(t, os.MkdirAll(repo, 0o755))
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "source ~/.zprofile\n")
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zprofile"), "export PATH\n")
+
+	report, err := NewService(repo, env).Status([]string{"zsh", "zsh"})
+	requireNoError(t, err)
+
+	gotPackages := make([]string, 0, len(report.Packages))
+	for _, pkg := range report.Packages {
+		gotPackages = append(gotPackages, pkg.Name)
+	}
+	requireEqualStrings(t, gotPackages, []string{"zsh", "zsh"})
+
+	gotUntracked := make([]string, 0, len(report.Untracked))
+	for _, item := range report.Untracked {
+		gotUntracked = append(gotUntracked, item.Path)
+	}
+	requireEqualStrings(t, gotUntracked, []string{"zsh/.zprofile"})
+}
+
+func TestStatusPackageFilterSourceDotSuppressesPackageUntrackedContent(t *testing.T) {
 	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
 	requireNoError(t, os.MkdirAll(repo, 0o755))
@@ -469,25 +544,20 @@ links = [
   { source = ".zshrc", target = "~/.zshrc" },
 ]
 `)
-	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux"), 0o755))
+	writeTextFile(t, filepath.Join(repo, "tmux", "tmux.conf"), "set -g mouse on\n")
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "source ~/.zprofile\n")
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zprofile"), "export PATH\n")
 	requireNoError(t, os.MkdirAll(filepath.Join(repo, "ghostty"), 0o755))
 
-	report, err := NewService(repo, env).Status([]string{"zsh", "zsh"})
+	report, err := NewService(repo, env).Status([]string{"tmux"})
 	requireNoError(t, err)
 
-	gotPackages := make([]string, 0, len(report.Packages))
-	for _, pkg := range report.Packages {
-		gotPackages = append(gotPackages, pkg.Name)
+	if len(report.Untracked) != 0 {
+		t.Fatalf(
+			"source = . package should have no package-local untracked content, got %#v",
+			report.Untracked,
+		)
 	}
-	requireEqualStrings(t, gotPackages, []string{"zsh", "zsh"})
-
-	gotUntracked := make([]string, 0, len(report.Untracked))
-	for _, item := range report.Untracked {
-		gotUntracked = append(gotUntracked, item.Path)
-	}
-	requireEqualStrings(t, gotUntracked, []string{"ghostty", "zsh/.zprofile"})
 }
 
 func TestStatusReportsUntrackedRepositoryContent(t *testing.T) {
@@ -517,13 +587,18 @@ links = [
 	requireNoError(t, err)
 
 	got := make([]string, 0, len(report.Untracked))
+	byPath := map[string]UntrackedItem{}
 	for _, item := range report.Untracked {
 		if item.State != StateUntracked {
 			t.Fatalf("untracked item %s has state %s", item.Path, item.State)
 		}
 		got = append(got, item.Path)
+		byPath[item.Path] = item
 	}
 	requireEqualStrings(t, got, []string{"ghostty", "zsh/.zprofile", "zsh/secrets"})
+	requireUntrackedItemLocation(t, byPath["ghostty"], "", "")
+	requireUntrackedItemLocation(t, byPath["zsh/.zprofile"], "zsh", ".zprofile")
+	requireUntrackedItemLocation(t, byPath["zsh/secrets"], "zsh", "secrets")
 }
 
 func TestStatusReportsSourceAwareUntrackedRepositoryContent(t *testing.T) {
@@ -585,6 +660,24 @@ links = [
 			"wezterm",
 		},
 	)
+}
+
+func requireUntrackedItemLocation(
+	t *testing.T,
+	item UntrackedItem,
+	wantPackage, wantSource string,
+) {
+	t.Helper()
+	if item.Package != wantPackage || item.Source != wantSource {
+		t.Fatalf(
+			"untracked location mismatch for %s: want package=%q source=%q, got package=%q source=%q",
+			item.Path,
+			wantPackage,
+			wantSource,
+			item.Package,
+			item.Source,
+		)
+	}
 }
 
 func TestStatusFilterRejectsUnknownPackage(t *testing.T) {

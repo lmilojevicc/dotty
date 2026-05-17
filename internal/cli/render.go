@@ -184,7 +184,7 @@ func renderVerboseStatus(out io.Writer, report *dotty.StatusReport) {
 			fmt.Fprintln(out)
 		}
 		for _, item := range report.Untracked {
-			renderVerboseUntrackedRow(out, item.Path, item.State)
+			renderVerboseUntrackedRow(out, item)
 		}
 	}
 }
@@ -198,13 +198,23 @@ func renderVerboseStatusRow(out io.Writer, packageName, source, target string, s
 	fmt.Fprintf(out, " %s\n", renderState(state))
 }
 
-func renderVerboseUntrackedRow(out io.Writer, path string, state dotty.State) {
-	renderPadded(out, "-", mutedStyle, verbosePackageColumnWidth)
+func renderVerboseUntrackedRow(out io.Writer, item dotty.UntrackedItem) {
+	packageName := item.Package
+	packageRenderStyle := packageStyle
+	if packageName == "" {
+		packageName = "-"
+		packageRenderStyle = mutedStyle
+	}
+	source := item.Source
+	if source == "" {
+		source = item.Path
+	}
+	renderPadded(out, packageName, packageRenderStyle, verbosePackageColumnWidth)
 	fmt.Fprint(out, " ")
-	renderPadded(out, path, sourceStyle, verboseSourceColumnWidth)
+	renderPadded(out, source, sourceStyle, verboseSourceColumnWidth)
 	fmt.Fprint(out, " ")
 	renderPadded(out, "-", mutedStyle, verboseTargetColumnWidth)
-	fmt.Fprintf(out, " %s\n", renderState(state))
+	fmt.Fprintf(out, " %s\n", renderState(item.State))
 }
 
 func renderStatusHeader(out io.Writer, report *dotty.StatusReport) {

@@ -81,8 +81,10 @@ type EntryStatus struct {
 }
 
 type UntrackedItem struct {
-	Path  string
-	State State
+	Path    string
+	Package string
+	Source  string
+	State   State
 }
 
 func (s Service) Status(packageFilter []string) (*StatusReport, error) {
@@ -119,7 +121,7 @@ func (s Service) Status(packageFilter []string) (*StatusReport, error) {
 		report.Packages = append(report.Packages, status)
 	}
 
-	untracked, err := s.untrackedRepositoryContent(manifest)
+	untracked, err := s.untrackedContent(manifest, packageFilter)
 	if err != nil {
 		return nil, err
 	}
@@ -255,6 +257,33 @@ func summarizePackage(entries []EntryStatus) State {
 	return StatePartial
 }
 
+func (s Service) untrackedContent(
+	manifest *Manifest,
+	packageFilter []string,
+) ([]UntrackedItem, error) {
+	if len(packageFilter) == 0 {
+		return s.untrackedRepositoryContent(manifest)
+	}
+	seen := map[string]bool{}
+	var untracked []UntrackedItem
+	for _, packageName := range packageFilter {
+		pkg := manifest.Packages[packageName]
+		items, err := s.untrackedPackageContent(packageName, pkg)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			if seen[item.Path] {
+				continue
+			}
+			seen[item.Path] = true
+			untracked = append(untracked, item)
+		}
+	}
+	sort.Slice(untracked, func(i, j int) bool { return untracked[i].Path < untracked[j].Path })
+	return untracked, nil
+}
+
 func (s Service) untrackedRepositoryContent(manifest *Manifest) ([]UntrackedItem, error) {
 	entries, err := os.ReadDir(s.Repo)
 	if err != nil {
@@ -271,12 +300,7 @@ func (s Service) untrackedRepositoryContent(manifest *Manifest) ([]UntrackedItem
 			untracked = append(untracked, UntrackedItem{Path: name, State: StateUntracked})
 			continue
 		}
-		trackedSources := trackedSourcePrefixes(pkg)
-		if trackedSources["."] {
-			continue
-		}
-		packageRoot := PackageRoot(s.Repo, name)
-		items, err := untrackedUnderPackage(packageRoot, name, trackedSources)
+		items, err := s.untrackedPackageContent(name, pkg)
 		if err != nil {
 			return nil, err
 		}
@@ -284,6 +308,14 @@ func (s Service) untrackedRepositoryContent(manifest *Manifest) ([]UntrackedItem
 	}
 	sort.Slice(untracked, func(i, j int) bool { return untracked[i].Path < untracked[j].Path })
 	return untracked, nil
+}
+
+func (s Service) untrackedPackageContent(packageName string, pkg Package) ([]UntrackedItem, error) {
+	trackedSources := trackedSourcePrefixes(pkg)
+	if trackedSources["."] {
+		return nil, nil
+	}
+	return untrackedUnderPackage(PackageRoot(s.Repo, packageName), packageName, trackedSources)
 }
 
 func trackedSourcePrefixes(pkg Package) map[string]bool {
@@ -327,8 +359,10 @@ func untrackedUnderPackage(
 		items = append(
 			items,
 			UntrackedItem{
-				Path:  filepath.ToSlash(filepath.Join(packageName, rel)),
-				State: StateUntracked,
+				Path:    filepath.ToSlash(filepath.Join(packageName, rel)),
+				Package: packageName,
+				Source:  rel,
+				State:   StateUntracked,
 			},
 		)
 		if d.IsDir() {
