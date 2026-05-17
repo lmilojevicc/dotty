@@ -18,7 +18,7 @@ func fileHardlinkKey(info os.FileInfo) (hardlinkKey, uint64, bool) {
 	if !ok || stat.Nlink <= 1 {
 		return hardlinkKey{}, 0, false
 	}
-	return hardlinkKey{dev: uint64(stat.Dev), ino: stat.Ino}, uint64(stat.Nlink), true
+	return hardlinkKey{dev: statDev(stat), ino: stat.Ino}, uint64(stat.Nlink), true
 }
 
 func hasExternalHardlinks(path string) (bool, error) {
