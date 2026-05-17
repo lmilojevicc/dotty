@@ -1,4 +1,4 @@
-//go:build linux && !amd64
+//go:build linux && amd64
 
 package dotty
 
@@ -9,5 +9,5 @@ func statDev(stat *syscall.Stat_t) uint64 {
 }
 
 func statNlink(stat *syscall.Stat_t) uint64 {
-	return uint64(stat.Nlink)
+	return stat.Nlink
 }
