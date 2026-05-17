@@ -136,7 +136,9 @@ _Avoid_: transaction, all-or-nothing filesystem write
 - Linking creates missing target parent directories and refuses **Conflicts** by default; **Force Link** replaces conflicts destructively.
 - Unlinking removes only target-side links or content at mapped **Target Paths** and does not remove parent directories.
 - Status reports package summaries by default and per-mapping details in verbose output.
+- A single-package status request reports that Package's per-mapping details by default.
 - Status reports **Untracked Repository Content** by scanning the **Dotfiles Repository**, not by scanning arbitrary target-side directories.
+- Package-scoped status requests do not include repository-wide **Untracked Repository Content**.
 - **List** reports manifest inventory; status reports filesystem state.
 - **Init** does not overwrite existing package content or an existing **Manifest**.
 - **Map** operates on **Packages** and **Link Mappings**; link creation, **Unlink**, and **Hard Unlink** operate on **Packages** and target-side **Links**.

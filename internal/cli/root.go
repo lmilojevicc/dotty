@@ -264,7 +264,11 @@ func (a *app) statusCommand() *cobra.Command {
 				return err
 			}
 			report = dotty.FilterStatusReport(report, parsedStates)
-			renderStatus(a.out, report, verbose)
+			effectiveVerbose := verbose || len(args) == 1
+			if len(args) > 0 {
+				report.Untracked = nil
+			}
+			renderStatus(a.out, report, effectiveVerbose)
 			return nil
 		},
 	}

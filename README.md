@@ -135,7 +135,7 @@ Use `dotty map <package> <source> <target>` to add a Link Mapping from an existi
 
 All commands accept the global `--repo` flag when they need to operate on a specific Dotfiles Repository.
 
-`dotty status` prints the resolved Dotfiles Repository, package states, untracked repository content, and a summary count. Use `--state <state>` to keep aggregate Package rows and untracked rows that match a state. Supported values are `linked`, `unlinked`, `partial`, `conflict`, `missing-source`, `empty`, and `untracked`. Use `dotty status --verbose` or `dotty status -v` for per-Link Mapping status.
+`dotty status` prints the resolved Dotfiles Repository, package states, untracked repository content, and a summary count. Use `--state <state>` to keep aggregate Package rows and untracked rows that match a state. Supported values are `linked`, `unlinked`, `partial`, `conflict`, `missing-source`, `empty`, and `untracked`. Use `dotty status --verbose` or `dotty status -v` for per-Link Mapping status. A single package argument, such as `dotty status tmux`, implies verbose per-Link Mapping output for that Package. Package-scoped status does not include repository-wide Untracked Repository Content.
 
 ## Status States
 

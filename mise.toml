@@ -8,14 +8,14 @@
 description = "Format Go and YAML files"
 run = """
 golangci-lint fmt
-yamlfmt -conf .yamlfmt .
+yamlfmt -conf .yamlfmt -exclude .pi -exclude .worktrees .
 """
 
 [tasks."fmt:check"]
 description = "Check that Go and YAML formatting is up to date"
 run = """
 golangci-lint fmt --diff
-yamlfmt -conf .yamlfmt -lint .
+yamlfmt -conf .yamlfmt -lint -exclude .pi -exclude .worktrees .
 """
 
 [tasks.lint]

@@ -915,17 +915,12 @@ links = [
 		}
 	})
 
-	t.Run("positional-package-keeps-repository-untracked-content", func(t *testing.T) {
+	t.Run("positional-package-suppresses-repository-untracked-content", func(t *testing.T) {
 		out, errOut, err := executeCommand("--repo", repo, "status", "zsh", "--state", "untracked")
 		if err != nil {
 			t.Fatalf("status zsh --state untracked failed: %v\nstderr: %s", err, errOut)
 		}
-		want := fmt.Sprintf(
-			"Repository: ~/dotfiles\n\n%s\n  %s\n  %s\n\nSummary: 0 packages; 2 untracked\n",
-			"UNTRACKED",
-			"ghostty",
-			"zsh/.zprofile",
-		)
+		want := "Repository: ~/dotfiles\n\n\nSummary: 0 packages\n"
 		if out != want {
 			t.Fatalf("unexpected positional untracked output\nwant:\n%s\ngot:\n%s", want, out)
 		}
@@ -937,14 +932,11 @@ links = [
 			t.Fatalf("status with repeated zsh package failed: %v\nstderr: %s", err, errOut)
 		}
 		want := fmt.Sprintf(
-			"Repository: ~/dotfiles\n\n%-24s %s\n%-24s %s\n\n%s\n  %s\n  %s\n\nSummary: 2 packages: 2 linked; 2 untracked\n",
+			"Repository: ~/dotfiles\n\n%-24s %s\n%-24s %s\n\nSummary: 2 packages: 2 linked\n",
 			"zsh",
 			"LINKED",
 			"zsh",
 			"LINKED",
-			"UNTRACKED",
-			"ghostty",
-			"zsh/.zprofile",
 		)
 		if out != want {
 			t.Fatalf(
@@ -961,8 +953,10 @@ links = [
 			t.Fatalf("status zsh --state linked failed: %v\nstderr: %s", err, errOut)
 		}
 		want := fmt.Sprintf(
-			"Repository: ~/dotfiles\n\n%-24s %s\n\nSummary: 1 package: 1 linked\n",
+			"Repository: ~/dotfiles\n\n%-18s %-20s %-36s %s\n\nSummary: 1 package: 1 linked\n",
 			"zsh",
+			".zshrc",
+			"~/.zshrc",
 			"LINKED",
 		)
 		if out != want {
@@ -1938,6 +1932,36 @@ links = [
 	)
 	if out != want {
 		t.Fatalf("unexpected status output\nwant:\n%s\ngot:\n%s", want, out)
+	}
+
+	out, errOut, err = executeCommand("--repo", repo, "status", "zsh")
+	if err != nil {
+		t.Fatalf("status zsh failed: %v\nstderr: %s", err, errOut)
+	}
+	want = fmt.Sprintf(
+		"Repository: ~/dotfiles\n\n%-18s %-20s %-36s %s\n\nSummary: 1 package: 1 linked\n",
+		"zsh",
+		".zshrc",
+		"~/.zshrc",
+		"LINKED",
+	)
+	if out != want {
+		t.Fatalf("unexpected single-package status output\nwant:\n%s\ngot:\n%s", want, out)
+	}
+
+	out, errOut, err = executeCommand("--repo", repo, "status", "tmux", "zsh")
+	if err != nil {
+		t.Fatalf("status tmux zsh failed: %v\nstderr: %s", err, errOut)
+	}
+	want = fmt.Sprintf(
+		"Repository: ~/dotfiles\n\n%-24s %s\n%-24s %s\n\nSummary: 2 packages: 1 linked, 1 unlinked\n",
+		"tmux",
+		"UNLINKED",
+		"zsh",
+		"LINKED",
+	)
+	if out != want {
+		t.Fatalf("unexpected multi-package status output\nwant:\n%s\ngot:\n%s", want, out)
 	}
 
 	out, errOut, err = executeCommand("--repo", repo, "status", "--verbose")
