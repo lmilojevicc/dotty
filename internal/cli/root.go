@@ -42,6 +42,7 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 	cmd.AddCommand(app.initCommand())
 	cmd.AddCommand(app.addCommand())
 	cmd.AddCommand(app.mapCommand())
+	cmd.AddCommand(app.unmapCommand())
 	cmd.AddCommand(app.linkCommand())
 	cmd.AddCommand(app.unlinkCommand())
 	cmd.AddCommand(app.statusCommand())
@@ -106,7 +107,7 @@ func (a *app) addCommand() *cobra.Command {
 		Use:               "add <path> <package>",
 		Short:             "Adopt an existing file, directory, or symlink target into a package",
 		Args:              exactArgs(2),
-		ValidArgsFunction: completeAddArgs,
+		ValidArgsFunction: a.completeAddArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -157,8 +158,38 @@ func (a *app) mapCommand() *cobra.Command {
 	return cmd
 }
 
+func (a *app) unmapCommand() *cobra.Command {
+	var targets []string
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:               "unmap <package> --target <target>",
+		Short:             "Remove Manifest Link Mappings without changing files",
+		Args:              unmapArgs(&targets),
+		ValidArgsFunction: a.completePackages,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			svc, err := a.service()
+			if err != nil {
+				return err
+			}
+			results, err := svc.Unmap(
+				dotty.UnmapOptions{Package: args[0], Targets: targets, DryRun: dryRun},
+			)
+			if err != nil {
+				return err
+			}
+			renderUnmapResults(a.out, results)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
+	cmd.Flags().StringArrayVar(&targets, "target", nil, "Target Path to unmap (can be repeated)")
+	mustRegisterFlagCompletion(cmd, "target", a.completeTargets)
+	return cmd
+}
+
 func (a *app) linkCommand() *cobra.Command {
 	var collections []string
+	var targets []string
 	var all bool
 	var force bool
 	var dryRun bool
@@ -176,6 +207,7 @@ func (a *app) linkCommand() *cobra.Command {
 				dotty.LinkOptions{
 					Packages:    args,
 					Collections: collections,
+					Targets:     targets,
 					All:         all,
 					Force:       force,
 					DryRun:      dryRun,
@@ -193,12 +225,15 @@ func (a *app) linkCommand() *cobra.Command {
 		StringArrayVarP(&collections, "collection", "c", nil, "collection to link (can be repeated)")
 	mustRegisterFlagCompletion(cmd, "collection", a.completeCollections)
 	cmd.Flags().BoolVar(&force, "force", false, "destructively replace target conflicts")
+	cmd.Flags().StringArrayVar(&targets, "target", nil, "Target Path to link (can be repeated)")
+	mustRegisterFlagCompletion(cmd, "target", a.completeTargets)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
 	return cmd
 }
 
 func (a *app) unlinkCommand() *cobra.Command {
 	var collections []string
+	var targets []string
 	var all bool
 	var hard bool
 	var dryRun bool
@@ -216,6 +251,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 				dotty.UnlinkOptions{
 					Packages:    args,
 					Collections: collections,
+					Targets:     targets,
 					All:         all,
 					Hard:        hard,
 					DryRun:      dryRun,
@@ -234,6 +270,8 @@ func (a *app) unlinkCommand() *cobra.Command {
 	mustRegisterFlagCompletion(cmd, "collection", a.completeCollections)
 	cmd.Flags().
 		BoolVar(&hard, "hard", false, "remove expected links without leaving target-side copies")
+	cmd.Flags().StringArrayVar(&targets, "target", nil, "Target Path to unlink (can be repeated)")
+	mustRegisterFlagCompletion(cmd, "target", a.completeTargets)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
 	return cmd
 }
@@ -355,6 +393,15 @@ func noArgs(cmd *cobra.Command, args []string) error {
 func selectionArgs(collections *[]string, all *bool) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 && len(*collections) == 0 && !*all {
+			return usageError(cmd)
+		}
+		return nil
+	}
+}
+
+func unmapArgs(targets *[]string) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) != 1 || len(*targets) == 0 {
 			return usageError(cmd)
 		}
 		return nil

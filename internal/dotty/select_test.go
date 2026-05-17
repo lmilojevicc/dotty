@@ -1,6 +1,9 @@
 package dotty
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestResolvePackageSelectionExpandsCollectionsAndDedupesInOrder(t *testing.T) {
 	manifest := NewManifest()
@@ -91,4 +94,126 @@ func TestResolvePackageSelectionRejectsInvalidSelections(t *testing.T) {
 			requireErrorContains(t, err, tt.wantErr)
 		})
 	}
+}
+
+func TestResolveSelectedLinkMappingsDefaultsToAllMappingsInSelectedPackageOrder(t *testing.T) {
+	_, env := setupHome(t)
+	manifest := manifestForLinkMappingSelection()
+
+	selected, err := ResolveSelectedLinkMappings(
+		manifest,
+		[]string{"scripts"},
+		[]string{"terminal"},
+		false,
+		nil,
+		env,
+	)
+	requireNoError(t, err)
+	requireSelectedMappings(t, selected, []string{
+		"scripts:~/.local/bin/docx2pdf",
+		"scripts:~/.local/bin/sesh-fzf",
+		"tmux:~/.config/tmux",
+	})
+}
+
+func TestResolveSelectedLinkMappingsNarrowsByNormalizedTargetsAndDedupes(t *testing.T) {
+	home, env := setupHome(t)
+	manifest := manifestForLinkMappingSelection()
+
+	selected, err := ResolveSelectedLinkMappings(
+		manifest,
+		[]string{"scripts"},
+		nil,
+		false,
+		[]string{
+			filepath.Join(home, ".local", "bin", "sesh-fzf"),
+			"~/.local/bin/sesh-fzf",
+		},
+		env,
+	)
+	requireNoError(t, err)
+	requireSelectedMappings(t, selected, []string{"scripts:~/.local/bin/sesh-fzf"})
+}
+
+func TestResolveSelectedLinkMappingsUsesCollectionAndAllScope(t *testing.T) {
+	_, env := setupHome(t)
+	manifest := manifestForLinkMappingSelection()
+
+	selected, err := ResolveSelectedLinkMappings(
+		manifest,
+		nil,
+		[]string{"terminal"},
+		false,
+		[]string{"~/.config/tmux"},
+		env,
+	)
+	requireNoError(t, err)
+	requireSelectedMappings(t, selected, []string{"tmux:~/.config/tmux"})
+
+	selected, err = ResolveSelectedLinkMappings(
+		manifest,
+		nil,
+		nil,
+		true,
+		[]string{"~/.config/tmux"},
+		env,
+	)
+	requireNoError(t, err)
+	requireSelectedMappings(t, selected, []string{"tmux:~/.config/tmux"})
+}
+
+func TestResolveSelectedLinkMappingsRejectsTargetsOutsideSelectedScope(t *testing.T) {
+	_, env := setupHome(t)
+	manifest := manifestForLinkMappingSelection()
+
+	_, err := ResolveSelectedLinkMappings(
+		manifest,
+		[]string{"scripts"},
+		nil,
+		false,
+		[]string{"~/.config/tmux"},
+		env,
+	)
+	requireErrorContains(
+		t,
+		err,
+		"target \"~/.config/tmux\" is not mapped in the selected package scope",
+	)
+}
+
+func TestResolveSelectedLinkMappingsRejectsInvalidTargetSelectors(t *testing.T) {
+	_, env := setupHome(t)
+	manifest := manifestForLinkMappingSelection()
+
+	_, err := ResolveSelectedLinkMappings(
+		manifest,
+		[]string{"scripts"},
+		nil,
+		false,
+		[]string{"relative/target"},
+		env,
+	)
+	requireErrorContains(t, err, "must be absolute or home-relative")
+}
+
+func manifestForLinkMappingSelection() *Manifest {
+	manifest := NewManifest()
+	manifest.Packages["scripts"] = Package{Links: []LinkMapping{
+		{Source: "docx2pdf", Target: "~/.local/bin/docx2pdf"},
+		{Source: "sesh-fzf", Target: "~/.local/bin/sesh-fzf"},
+	}}
+	manifest.Packages["tmux"] = Package{Links: []LinkMapping{
+		{Source: ".", Target: "~/.config/tmux"},
+	}}
+	manifest.Collections["terminal"] = Collection{Packages: []string{"tmux"}}
+	return manifest
+}
+
+func requireSelectedMappings(t *testing.T, got []SelectedLinkMapping, want []string) {
+	t.Helper()
+	actual := make([]string, 0, len(got))
+	for _, item := range got {
+		actual = append(actual, item.Package+":"+item.Link.Target)
+	}
+	requireEqualStrings(t, actual, want)
 }

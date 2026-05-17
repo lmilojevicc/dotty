@@ -15,7 +15,7 @@ _Sync configuration files across machines using a manifest._
 
 - **Explicit manifest**: Every managed target is recorded in `dotty.toml` as a source-to-target Link Mapping.
 - **Safe by default**: Non-symlink content at a Target Path is a Conflict unless you explicitly pass `--force`.
-- **Dry runs**: Preview `add`, `map`, `link`, and `unlink` operations without changing files.
+- **Dry runs**: Preview `add`, `map`, `unmap`, `link`, and `unlink` operations without changing files.
 - **Collections**: Link or unlink named groups of Packages.
 - **Status reporting**: See linked, unlinked, partial, conflict, missing-source, empty, and untracked states.
 - **Soft and hard unlink**: Leave a target-side copy by default, or remove only expected Dotty Links with `--hard`.
@@ -58,15 +58,24 @@ dotty add --dry-run ~/.config/tmux tmux
 dotty map tmux . ~/.tmux
 dotty map --dry-run tmux . ~/.tmux
 
+# Remove a Link Mapping from the Manifest without touching files
+dotty unmap --dry-run tmux --target ~/.tmux
+dotty unmap tmux --target ~/.tmux
+
 # Link or unlink a Package
 dotty link --dry-run tmux
 dotty link tmux
 dotty unlink --dry-run tmux
 dotty unlink tmux
 
+# Link or unlink only one Target Path from a Package
+dotty link scripts --target ~/.local/bin/sesh-fzf
+dotty unlink scripts --target ~/.local/bin/sesh-fzf
+
 # Remove only expected Dotty Links without leaving target-side copies
 dotty unlink --hard --dry-run tmux
 dotty unlink --hard tmux
+dotty unlink --hard scripts --target ~/.local/bin/sesh-fzf
 
 # Link or unlink every Package in the Manifest
 dotty link --all
@@ -119,6 +128,10 @@ dotty unlink --collection terminal
 
 Use `dotty map <package> <source> <target>` to add a Link Mapping from an existing Package Source to an additional Target Path without copying, moving, or linking filesystem content. The Package and Package Source must already exist; `map` only validates and writes the Manifest. Run `dotty link` later to create the Link, using `--force` only if that Target Path is a Conflict you intentionally want to replace.
 
+Use `dotty unmap <package> --target <target>` to remove one or more Link Mappings from the Manifest without unlinking, deleting, copying, or replacing target-side filesystem content or Package Sources. If the last Link Mapping is removed, the Package remains in the Manifest as an Empty Package. `unmap` does not change Collections.
+
+Use `--target <target>` with `dotty link` or `dotty unlink` to narrow a Package, Collection, or `--all` selection to individual Target Paths. Without `--target`, `link` and `unlink` keep their whole-Package behavior.
+
 ## Commands
 
 | Command                                                           | Purpose                                                              | Useful flags                                    |
@@ -126,8 +139,9 @@ Use `dotty map <package> <source> <target>` to add a Link Mapping from an existi
 | `dotty init [<path>]`                                             | Initialize a Dotfiles Repository and remember it as the default.     | None                                            |
 | `dotty add <path> <package>`                                      | Adopt an existing file, directory, or symlink target into a Package. | `--dry-run`                                     |
 | `dotty map <package> <source> <target>`                           | Add a Manifest Link Mapping without changing files.                  | `--dry-run`                                     |
-| `dotty link <package>... \| --all \| --collection <collection>`   | Create Links for selected Packages.                                  | `--all`, `--collection`, `--force`, `--dry-run` |
-| `dotty unlink <package>... \| --all \| --collection <collection>` | Remove Links for selected Packages.                                  | `--all`, `--collection`, `--hard`, `--dry-run`  |
+| `dotty unmap <package> --target <target>`                         | Remove Manifest Link Mappings without changing files.                | `--target`, `--dry-run`                         |
+| `dotty link <package>... \| --all \| --collection <collection>`   | Create Links for selected Packages.                                  | `--all`, `--collection`, `--target`, `--force`, `--dry-run` |
+| `dotty unlink <package>... \| --all \| --collection <collection>` | Remove Links for selected Packages.                                  | `--all`, `--collection`, `--target`, `--hard`, `--dry-run`  |
 | `dotty status [<package>...]`                                     | Show package state inferred from the Manifest and filesystem.        | `--state`, `--verbose`, `-v`                    |
 | `dotty list`                                                      | List Packages and Collections defined in the Manifest.               | None                                            |
 | `dotty repo`                                                      | Show the resolved Dotfiles Repository and config file path.          | None                                            |
@@ -161,6 +175,8 @@ dotty completion zsh
 dotty completion fish
 dotty completion powershell
 ```
+
+Generated completions suggest Dotty-aware values when the Manifest can be resolved: Packages, Collections, status states, Manifest Target Paths for `--target`, and Package Source paths for `dotty map <package> <tab>`. Path arguments such as `dotty add <tab>`, `dotty init <tab>`, `dotty map <package> <source> <tab>`, and `--repo <tab>` keep filesystem completion.
 
 Example local installs:
 

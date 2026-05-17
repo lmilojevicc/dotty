@@ -9,6 +9,7 @@ import (
 type UnlinkOptions struct {
 	Packages    []string
 	Collections []string
+	Targets     []string
 	All         bool
 	Hard        bool
 	DryRun      bool
@@ -102,26 +103,25 @@ func (s Service) planUnlink(options UnlinkOptions) (*unlinkPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	selected, err := ResolvePackageSelection(
+	selected, err := ResolveSelectedLinkMappings(
 		manifest,
 		options.Packages,
 		options.Collections,
 		options.All,
+		options.Targets,
+		s.Env,
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	plan := &unlinkPlan{}
-	for _, packageName := range selected {
-		pkg := manifest.Packages[packageName]
-		for _, mapping := range pkg.Links {
-			action, err := s.classifyUnlinkAction(packageName, mapping, options.Hard)
-			if err != nil {
-				return nil, err
-			}
-			plan.actions = append(plan.actions, action)
+	for _, mapping := range selected {
+		action, err := s.classifyUnlinkAction(mapping.Package, mapping.Link, options.Hard)
+		if err != nil {
+			return nil, err
 		}
+		plan.actions = append(plan.actions, action)
 	}
 	return plan, nil
 }

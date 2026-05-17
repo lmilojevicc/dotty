@@ -1685,6 +1685,92 @@ links = [
 	assertSymlink(t, filepath.Join(home, ".zshrc"), filepath.Join(repo, "zsh", ".zshrc"))
 }
 
+func TestLinkTargetsOnlySelectedLinkMappings(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+  { source = "sesh-fzf", target = "~/.local/bin/sesh-fzf" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "scripts", "docx2pdf"), "docx2pdf\n")
+	writeTextFile(t, filepath.Join(repo, "scripts", "sesh-fzf"), "sesh-fzf\n")
+
+	results, err := NewService(repo, env).Link(LinkOptions{
+		Packages: []string{"scripts"},
+		Targets:  []string{"~/.local/bin/sesh-fzf"},
+	})
+	requireNoError(t, err)
+	if len(results) != 1 || results[0].Target != "~/.local/bin/sesh-fzf" {
+		t.Fatalf("unexpected partial link results: %#v", results)
+	}
+
+	requireNoPath(t, filepath.Join(home, ".local", "bin", "docx2pdf"))
+	assertSymlink(
+		t,
+		filepath.Join(home, ".local", "bin", "sesh-fzf"),
+		filepath.Join(repo, "scripts", "sesh-fzf"),
+	)
+}
+
+func TestLinkTargetSelectionFailsBeforeChangingFilesystem(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+  { source = "sesh-fzf", target = "~/.local/bin/sesh-fzf" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "scripts", "docx2pdf"), "docx2pdf\n")
+	writeTextFile(t, filepath.Join(repo, "scripts", "sesh-fzf"), "sesh-fzf\n")
+
+	_, err := NewService(repo, env).Link(LinkOptions{
+		Packages: []string{"scripts"},
+		Targets:  []string{"~/.local/bin/docx2pdf", "~/.missing-target"},
+	})
+	requireErrorContains(t, err, "target \"~/.missing-target\" is not mapped")
+	requireNoPath(t, filepath.Join(home, ".local", "bin", "docx2pdf"))
+	requireNoPath(t, filepath.Join(home, ".local", "bin", "sesh-fzf"))
+}
+
+func TestLinkTargetSelectionWorksWithCollectionsAndAll(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "sesh-fzf", target = "~/.local/bin/sesh-fzf" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[collections.terminal]
+packages = ["tmux", "scripts"]
+`)
+	writeTextFile(t, filepath.Join(repo, "scripts", "sesh-fzf"), "sesh-fzf\n")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux"), 0o755))
+	svc := NewService(repo, env)
+
+	_, err := svc.Link(
+		LinkOptions{Collections: []string{"terminal"}, Targets: []string{"~/.local/bin/sesh-fzf"}},
+	)
+	requireNoError(t, err)
+	assertSymlink(
+		t,
+		filepath.Join(home, ".local", "bin", "sesh-fzf"),
+		filepath.Join(repo, "scripts", "sesh-fzf"),
+	)
+	requireNoPath(t, filepath.Join(home, ".config", "tmux"))
+
+	_, err = svc.Link(LinkOptions{All: true, Targets: []string{"~/.config/tmux"}})
+	requireNoError(t, err)
+	assertSymlink(t, filepath.Join(home, ".config", "tmux"), filepath.Join(repo, "tmux"))
+}
+
 func TestUnlinkHandlesAbsentTargetsAndHardUnlinkWithoutSource(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	svc := NewService(repo, env)
@@ -1832,6 +1918,71 @@ links = [
 	requireUnlinkResultPackages(t, results, []string{"tmux", "zsh"})
 	requireNoPath(t, filepath.Join(home, ".config", "tmux"))
 	requireNoPath(t, filepath.Join(home, ".zshrc"))
+}
+
+func TestUnlinkTargetsOnlySelectedLinkMappings(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+  { source = "sesh-fzf", target = "~/.local/bin/sesh-fzf" },
+]
+`)
+	docxSource := filepath.Join(repo, "scripts", "docx2pdf")
+	seshSource := filepath.Join(repo, "scripts", "sesh-fzf")
+	writeTextFile(t, docxSource, "docx2pdf\n")
+	writeTextFile(t, seshSource, "sesh-fzf\n")
+	docxTarget := filepath.Join(home, ".local", "bin", "docx2pdf")
+	seshTarget := filepath.Join(home, ".local", "bin", "sesh-fzf")
+	requireNoError(t, os.MkdirAll(filepath.Dir(docxTarget), 0o755))
+	requireNoError(t, os.Symlink(docxSource, docxTarget))
+	requireNoError(t, os.Symlink(seshSource, seshTarget))
+
+	results, err := NewService(repo, env).Unlink(UnlinkOptions{
+		Packages: []string{"scripts"},
+		Targets:  []string{"~/.local/bin/sesh-fzf"},
+	})
+	requireNoError(t, err)
+	if len(results) != 1 || results[0].Target != "~/.local/bin/sesh-fzf" || results[0].Hard {
+		t.Fatalf("unexpected partial unlink results: %#v", results)
+	}
+
+	assertSymlink(t, docxTarget, docxSource)
+	requireFileContent(t, seshTarget, "sesh-fzf\n")
+}
+
+func TestHardUnlinkTargetsOnlySelectedLinkMappings(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+  { source = "sesh-fzf", target = "~/.local/bin/sesh-fzf" },
+]
+`)
+	docxSource := filepath.Join(repo, "scripts", "docx2pdf")
+	seshSource := filepath.Join(repo, "scripts", "sesh-fzf")
+	writeTextFile(t, docxSource, "docx2pdf\n")
+	writeTextFile(t, seshSource, "sesh-fzf\n")
+	docxTarget := filepath.Join(home, ".local", "bin", "docx2pdf")
+	seshTarget := filepath.Join(home, ".local", "bin", "sesh-fzf")
+	requireNoError(t, os.MkdirAll(filepath.Dir(docxTarget), 0o755))
+	requireNoError(t, os.Symlink(docxSource, docxTarget))
+	requireNoError(t, os.Symlink(seshSource, seshTarget))
+
+	results, err := NewService(repo, env).Unlink(UnlinkOptions{
+		Packages: []string{"scripts"},
+		Targets:  []string{"~/.local/bin/sesh-fzf"},
+		Hard:     true,
+	})
+	requireNoError(t, err)
+	if len(results) != 1 || results[0].Target != "~/.local/bin/sesh-fzf" || !results[0].Hard {
+		t.Fatalf("unexpected partial hard unlink results: %#v", results)
+	}
+
+	assertSymlink(t, docxTarget, docxSource)
+	requireNoPath(t, seshTarget)
 }
 
 func TestUnlinkRefusesConflictsAndWrongSymlinks(t *testing.T) {

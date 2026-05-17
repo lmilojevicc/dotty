@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -81,13 +83,16 @@ func completeInitArgs(
 	return nil, cobra.ShellCompDirectiveFilterDirs
 }
 
-func completeAddArgs(
+func (a *app) completeAddArgs(
 	cmd *cobra.Command,
 	args []string,
 	toComplete string,
 ) ([]string, cobra.ShellCompDirective) {
 	if len(args) == 0 {
 		return nil, cobra.ShellCompDirectiveDefault
+	}
+	if len(args) == 1 {
+		return a.completePackages(cmd, nil, toComplete)
 	}
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }
@@ -99,6 +104,12 @@ func (a *app) completeMapArgs(
 ) ([]string, cobra.ShellCompDirective) {
 	if len(args) == 0 {
 		return a.completePackages(cmd, args, toComplete)
+	}
+	if len(args) == 1 {
+		return a.completePackageSources(args[0], toComplete)
+	}
+	if len(args) == 2 {
+		return nil, cobra.ShellCompDirectiveDefault
 	}
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }
@@ -165,6 +176,101 @@ func (a *app) completeStatusStates(
 	), cobra.ShellCompDirectiveNoFileComp
 }
 
+func (a *app) completeTargets(
+	cmd *cobra.Command,
+	args []string,
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	manifest, _, env, err := a.completionManifest()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	selectedValues, _ := cmd.Flags().GetStringArray("target")
+	selected := selectedCompletions(selectedValues)
+	targets := a.completionTargetsForScope(cmd, manifest, args, env)
+	return completeStrings(targets, selected, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func (a *app) completionTargetsForScope(
+	cmd *cobra.Command,
+	manifest *dotty.Manifest,
+	args []string,
+	env dotty.Env,
+) []string {
+	packages := args
+	collections, _ := cmd.Flags().GetStringArray("collection")
+	all, _ := cmd.Flags().GetBool("all")
+	if cmd.Name() == "unmap" {
+		collections = nil
+		all = false
+		if len(args) > 1 {
+			packages = args[:1]
+		}
+	}
+
+	if len(packages) > 0 || len(collections) > 0 || all {
+		selected, err := dotty.ResolveSelectedLinkMappings(
+			manifest,
+			packages,
+			collections,
+			all,
+			nil,
+			env,
+		)
+		if err == nil {
+			targets := make([]string, 0, len(selected))
+			for _, item := range selected {
+				targets = append(targets, item.Link.Target)
+			}
+			return targets
+		}
+	}
+
+	targets := []string{}
+	for _, packageName := range sortedKeys(manifest.Packages) {
+		pkg := manifest.Packages[packageName]
+		for _, link := range pkg.Links {
+			targets = append(targets, link.Target)
+		}
+	}
+	return targets
+}
+
+func (a *app) completePackageSources(
+	packageName string,
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	manifest, repo, _, err := a.completionManifest()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	if _, ok := manifest.Packages[packageName]; !ok {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	packageRoot := dotty.PackageRoot(repo, packageName)
+	choices := []string{}
+	err = filepath.WalkDir(packageRoot, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == packageRoot {
+			return nil
+		}
+		rel, err := filepath.Rel(packageRoot, path)
+		if err != nil {
+			return err
+		}
+		choices = append(choices, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return completeStrings(choices, nil, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
 func (a *app) completionInventory() (*dotty.Inventory, error) {
 	env, err := a.completionEnv()
 	if err != nil {
@@ -175,6 +281,22 @@ func (a *app) completionInventory() (*dotty.Inventory, error) {
 		return nil, err
 	}
 	return dotty.NewService(repo, env).List()
+}
+
+func (a *app) completionManifest() (*dotty.Manifest, string, dotty.Env, error) {
+	env, err := a.completionEnv()
+	if err != nil {
+		return nil, "", dotty.Env{}, err
+	}
+	repo, err := dotty.ResolveRepo(a.repoFlag, env)
+	if err != nil {
+		return nil, "", dotty.Env{}, err
+	}
+	manifest, err := dotty.LoadManifest(repo, env)
+	if err != nil {
+		return nil, "", dotty.Env{}, err
+	}
+	return manifest, repo, env, nil
 }
 
 func (a *app) completionEnv() (dotty.Env, error) {
@@ -201,6 +323,15 @@ func selectedCompletions(values []string) map[string]bool {
 		selected[value] = true
 	}
 	return selected
+}
+
+func sortedKeys[T any](m map[string]T) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 func mustRegisterFlagCompletion(cmd *cobra.Command, flagName string, fn cobra.CompletionFunc) {

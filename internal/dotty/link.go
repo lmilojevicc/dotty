@@ -8,6 +8,7 @@ import (
 type LinkOptions struct {
 	Packages    []string
 	Collections []string
+	Targets     []string
 	All         bool
 	Force       bool
 	DryRun      bool
@@ -78,26 +79,25 @@ func (s Service) planLink(options LinkOptions) (*linkPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	selected, err := ResolvePackageSelection(
+	selected, err := ResolveSelectedLinkMappings(
 		manifest,
 		options.Packages,
 		options.Collections,
 		options.All,
+		options.Targets,
+		s.Env,
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	plan := &linkPlan{}
-	for _, packageName := range selected {
-		pkg := manifest.Packages[packageName]
-		for _, mapping := range pkg.Links {
-			action, err := s.classifyLinkAction(packageName, mapping, options.Force)
-			if err != nil {
-				return nil, err
-			}
-			plan.actions = append(plan.actions, action)
+	for _, mapping := range selected {
+		action, err := s.classifyLinkAction(mapping.Package, mapping.Link, options.Force)
+		if err != nil {
+			return nil, err
 		}
+		plan.actions = append(plan.actions, action)
 	}
 	return plan, nil
 }
