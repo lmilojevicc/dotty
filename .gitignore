@@ -4,3 +4,14 @@
 /.opencode/
 /.sisyphus/
 /.poster/
+
+/docs/superpowers/
+/goals/
+/dotty-feedback/
+/USER_FEEDBACK.md
+/FUTURE-FEATURE.md
+/docs/completion-matrix.md
+/docs/doctor-edge-cases.md
+/docs/feature-backlog.md
+/docs/future-command-ideas.md
+/docs/refactor-command-messages.md
