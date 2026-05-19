@@ -1,6 +1,7 @@
 package dotty
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -125,12 +126,16 @@ func (s Service) resolveLinkSelections(
 		return s.resolveTrackedLinkSelections(manifest, options)
 	}
 	if len(options.Selectors) > 0 {
-		return ResolveSelectors(manifest, ResolveOptions{
+		selected, err := ResolveSelectors(manifest, ResolveOptions{
 			Selectors:   options.Selectors,
 			Collections: options.Collections,
 			Targets:     options.Targets,
 			All:         options.All,
 		}, s.Env)
+		if err != nil {
+			return nil, s.hintTrackForUnknownSource(err, options)
+		}
+		return selected, nil
 	}
 	return ResolveSelectedLinkMappings(
 		manifest,
@@ -140,6 +145,24 @@ func (s Service) resolveLinkSelections(
 		options.Targets,
 		s.Env,
 	)
+}
+
+func (s Service) hintTrackForUnknownSource(err error, options LinkOptions) error {
+	if len(options.Targets) == 0 {
+		return err
+	}
+	var unknownSource UnknownSourceError
+	if !errors.As(err, &unknownSource) {
+		return err
+	}
+	sourcePath, pathErr := PackageSourcePath(s.Repo, unknownSource.Package, unknownSource.Source)
+	if pathErr != nil {
+		return err
+	}
+	if exists, pathErr := pathExists(sourcePath); pathErr != nil || !exists {
+		return err
+	}
+	return fmt.Errorf("%w (use --track if this is new repository content)", err)
 }
 
 func (s Service) resolveTrackedLinkSelections(

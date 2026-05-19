@@ -64,7 +64,7 @@ dotty link --dry-run tmux
 dotty link tmux
 dotty link scripts/docx2pdf
 
-# Track and link a new target in one atomic operation
+# Track and link repository content in one atomic operation
 dotty link scripts/docx2pdf --target ~/.local/bin/docx2pdf --track
 
 # Unlink a package or a single source; default unlink removes expected links
@@ -133,7 +133,7 @@ dotty unlink --collection terminal
 > [!NOTE]
 > Dotty normalizes `dotty.toml` when commands write the manifest. Hand formatting and comments in the manifest are not preserved.
 
-Use `dotty track <selector> <target>` or `dotty track <selector> --target <target>` to add manifest entries for repository content that already exists. `track` only edits the manifest; it does not create target-side links.
+Use `dotty track <selector> <target>` or `dotty track <selector> --target <target>` to add manifest entries for repository content that already exists. `track` only edits the manifest; it does not create target-side links. Use `dotty link <selector> --target <target> --track` when a repository source exists and you want to record and link it in one operation.
 
 Use `dotty untrack <selector> [target...]` or `dotty untrack <selector> --target <target>` to remove manifest entries without unlinking, deleting, copying, or replacing target-side content. If target-side links still exist, `untrack` reports that they were not removed. If the last entry is removed, the package remains in the manifest as an empty package.
 

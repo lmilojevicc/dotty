@@ -11,6 +11,15 @@ type SelectedLinkMapping struct {
 	Added   bool
 }
 
+type UnknownSourceError struct {
+	Package string
+	Source  string
+}
+
+func (e UnknownSourceError) Error() string {
+	return fmt.Sprintf("unknown source %q in package %q", e.Source, e.Package)
+}
+
 func ResolvePackageSelection(
 	manifest *Manifest,
 	packages []string,
@@ -158,11 +167,7 @@ func ResolveSelectors(
 			selected = append(selected, SelectedLinkMapping{Package: selector.Package, Link: link})
 		}
 		if selector.IsPackageSource() && !matchedSource {
-			return nil, fmt.Errorf(
-				"unknown source %q in package %q",
-				selector.Source,
-				selector.Package,
-			)
+			return nil, UnknownSourceError(selector)
 		}
 	}
 

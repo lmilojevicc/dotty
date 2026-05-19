@@ -2909,6 +2909,9 @@ links = [
   { source = ".", target = "~/.config/tmux" },
 ]
 
+[packages.scripts]
+links = []
+
 [collections.terminal]
 packages = ["zsh"]
 `
@@ -2923,6 +2926,10 @@ packages = ["zsh"]
 		); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.MkdirAll(filepath.Join(repo, "scripts"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeTextFile(t, filepath.Join(repo, "scripts", "docx2pdf"), "#!/bin/sh\n")
 		conflictTarget := filepath.Join(home, ".zshrc")
 		if err := os.WriteFile(conflictTarget, []byte("local copy\n"), 0o644); err != nil {
 			t.Fatal(err)
@@ -2948,6 +2955,15 @@ packages = ["zsh"]
 				args: []string{"--repo", repo, "link", "--collection", "desktop"},
 				want: "error: unknown collection \"desktop\"\n" +
 					"hint: run `dotty list` to see collections\n",
+			},
+			{
+				name: "unknown source with track hint",
+				args: []string{
+					"--repo", repo, "link", "scripts/docx2pdf",
+					"--target", "~/.local/bin/docx2pdf",
+				},
+				want: "error: unknown source \"docx2pdf\" in package \"scripts\"\n" +
+					"hint: use --track if this is new repository content\n",
 			},
 			{
 				name: "invalid status state",
