@@ -2010,8 +2010,8 @@ links = [
 	requireNoPath(t, filepath.Join(home, ".local", "bin", "sesh-fzf"))
 }
 
-func TestLinkTargetSelectionWorksWithCollectionsAndAll(t *testing.T) {
-	home, repo, env := setupLinkedPackageTest(t, `version = 1
+func TestLinkTargetSelectionRejectsCollectionsAndAll(t *testing.T) {
+	_, _, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.scripts]
 links = [
@@ -2026,24 +2026,20 @@ links = [
 [collections.terminal]
 packages = ["tmux", "scripts"]
 `)
-	writeTextFile(t, filepath.Join(repo, "scripts", "sesh-fzf"), "sesh-fzf\n")
-	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux"), 0o755))
-	svc := NewService(repo, env)
+	manifest := manifestForLinkMappingSelection()
+	svc := NewService("/tmp/dotfiles", env)
 
-	_, err := svc.Link(
-		LinkOptions{Collections: []string{"terminal"}, Targets: []string{"~/.local/bin/sesh-fzf"}},
-	)
-	requireNoError(t, err)
-	assertSymlink(
-		t,
-		filepath.Join(home, ".local", "bin", "sesh-fzf"),
-		filepath.Join(repo, "scripts", "sesh-fzf"),
-	)
-	requireNoPath(t, filepath.Join(home, ".config", "tmux"))
+	_, err := svc.resolveLinkSelections(manifest, LinkOptions{
+		Collections: []string{"terminal"},
+		Targets:     []string{"~/.local/bin/sesh-fzf"},
+	})
+	requireErrorContains(t, err, "--target can only be used with one selector")
 
-	_, err = svc.Link(LinkOptions{All: true, Targets: []string{"~/.config/tmux"}})
-	requireNoError(t, err)
-	assertSymlink(t, filepath.Join(home, ".config", "tmux"), filepath.Join(repo, "tmux"))
+	_, err = svc.resolveLinkSelections(manifest, LinkOptions{
+		All:     true,
+		Targets: []string{"~/.config/tmux"},
+	})
+	requireErrorContains(t, err, "--target can only be used with one selector")
 }
 
 func TestUnlinkUntrackSourceRemovesLinkAndMapping(t *testing.T) {

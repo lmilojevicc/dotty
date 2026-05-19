@@ -143,6 +143,31 @@ func TestResolveSelectorsTargetsNarrowOneSelector(t *testing.T) {
 	requireSelectedMappings(t, selected, []string{"scripts:~/.local/bin/sesh-fzf"})
 }
 
+func TestResolveSelectorsRejectsTargetsWithAllOrCollections(t *testing.T) {
+	_, env := setupHome(t)
+	manifest := manifestForLinkMappingSelection()
+
+	tests := []struct {
+		name    string
+		options ResolveOptions
+	}{
+		{name: "all", options: ResolveOptions{All: true, Targets: []string{"~/.config/tmux"}}},
+		{
+			name: "collection",
+			options: ResolveOptions{
+				Collections: []string{"terminal"},
+				Targets:     []string{"~/.config/tmux"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ResolveSelectors(manifest, tt.options, env)
+			requireErrorContains(t, err, "--target can only be used with one selector")
+		})
+	}
+}
+
 func TestResolveSelectorsRejectsTargetsWithMultipleSelectors(t *testing.T) {
 	_, env := setupHome(t)
 	manifest := manifestForLinkMappingSelection()
@@ -155,7 +180,7 @@ func TestResolveSelectorsRejectsTargetsWithMultipleSelectors(t *testing.T) {
 		Targets: []string{"~/.local/bin/docx2pdf"},
 	}, env)
 
-	requireErrorContains(t, err, "--target cannot be combined with multiple selectors")
+	requireErrorContains(t, err, "--target can only be used with one selector")
 }
 
 func mustParseSelector(t *testing.T, arg string) Selector {

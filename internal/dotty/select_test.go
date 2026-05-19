@@ -135,31 +135,35 @@ func TestResolveSelectedLinkMappingsNarrowsByNormalizedTargetsAndDedupes(t *test
 	requireSelectedMappings(t, selected, []string{"scripts:~/.local/bin/sesh-fzf"})
 }
 
-func TestResolveSelectedLinkMappingsUsesCollectionAndAllScope(t *testing.T) {
+func TestResolveSelectedLinkMappingsRejectsTargetsWithAllCollectionsOrMultiplePackages(
+	t *testing.T,
+) {
 	_, env := setupHome(t)
 	manifest := manifestForLinkMappingSelection()
 
-	selected, err := ResolveSelectedLinkMappings(
-		manifest,
-		nil,
-		[]string{"terminal"},
-		false,
-		[]string{"~/.config/tmux"},
-		env,
-	)
-	requireNoError(t, err)
-	requireSelectedMappings(t, selected, []string{"tmux:~/.config/tmux"})
-
-	selected, err = ResolveSelectedLinkMappings(
-		manifest,
-		nil,
-		nil,
-		true,
-		[]string{"~/.config/tmux"},
-		env,
-	)
-	requireNoError(t, err)
-	requireSelectedMappings(t, selected, []string{"tmux:~/.config/tmux"})
+	tests := []struct {
+		name        string
+		packages    []string
+		collections []string
+		all         bool
+	}{
+		{name: "all", all: true},
+		{name: "collection", collections: []string{"terminal"}},
+		{name: "multiple packages", packages: []string{"scripts", "tmux"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ResolveSelectedLinkMappings(
+				manifest,
+				tt.packages,
+				tt.collections,
+				tt.all,
+				[]string{"~/.config/tmux"},
+				env,
+			)
+			requireErrorContains(t, err, "--target can only be used with one selector")
+		})
+	}
 }
 
 func TestResolveSelectedLinkMappingsRejectsTargetsOutsideSelectedScope(t *testing.T) {

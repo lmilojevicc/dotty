@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lmilojevicc/dotty/internal/dotty"
@@ -54,6 +55,95 @@ links = [
   { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
 ]
 `)
+}
+
+func TestLinkAndUnlinkRejectTargetWithAllCollectionOrMultipleSelectors(t *testing.T) {
+	_, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[collections.one]
+packages = ["scripts"]
+`)
+	writeTextFile(t, filepath.Join(repo, "scripts", "docx2pdf"), "#!/bin/sh\n")
+	writeTextFile(t, filepath.Join(repo, "tmux", "tmux.conf"), "set -g mouse on\n")
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "link all",
+			args: []string{"link", "--all", "--target", "~/.local/bin/docx2pdf", "--dry-run"},
+		},
+		{
+			name: "link collection",
+			args: []string{
+				"link",
+				"--collection",
+				"one",
+				"--target",
+				"~/.local/bin/docx2pdf",
+				"--dry-run",
+			},
+		},
+		{
+			name: "link multiple selectors",
+			args: []string{
+				"link",
+				"scripts/docx2pdf",
+				"tmux",
+				"--target",
+				"~/.local/bin/docx2pdf",
+				"--dry-run",
+			},
+		},
+		{
+			name: "unlink all",
+			args: []string{"unlink", "--all", "--target", "~/.local/bin/docx2pdf", "--dry-run"},
+		},
+		{
+			name: "unlink collection",
+			args: []string{
+				"unlink",
+				"--collection",
+				"one",
+				"--target",
+				"~/.local/bin/docx2pdf",
+				"--dry-run",
+			},
+		},
+		{
+			name: "unlink multiple selectors",
+			args: []string{
+				"unlink",
+				"scripts/docx2pdf",
+				"tmux",
+				"--target",
+				"~/.local/bin/docx2pdf",
+				"--dry-run",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"--repo", repo}, tt.args...)
+			_, _, err := executeCommand(args...)
+			if err == nil ||
+				!strings.Contains(err.Error(), "--target can only be used with one selector") {
+				t.Fatalf("expected target scope rejection, got %v", err)
+			}
+		})
+	}
 }
 
 func TestLinkAndUnlinkAcceptPackageSourceSelector(t *testing.T) {

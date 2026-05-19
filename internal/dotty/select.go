@@ -72,8 +72,13 @@ func ResolveSelectors(
 	options ResolveOptions,
 	env Env,
 ) ([]SelectedLinkMapping, error) {
-	if len(options.Targets) > 0 && len(options.Selectors) > 1 {
-		return nil, fmt.Errorf("--target cannot be combined with multiple selectors")
+	if err := rejectInvalidTargetScope(
+		len(options.Targets),
+		len(options.Selectors),
+		len(options.Collections),
+		options.All,
+	); err != nil {
+		return nil, err
 	}
 	if options.All && (len(options.Selectors) > 0 || len(options.Collections) > 0) {
 		return nil, fmt.Errorf("--all cannot be combined with selectors or collections")
@@ -189,6 +194,14 @@ func ResolveSelectedLinkMappings(
 	targets []string,
 	env Env,
 ) ([]SelectedLinkMapping, error) {
+	if err := rejectInvalidTargetScope(
+		len(targets),
+		len(packages),
+		len(collections),
+		all,
+	); err != nil {
+		return nil, err
+	}
 	selectedPackages, err := ResolvePackageSelection(manifest, packages, collections, all)
 	if err != nil {
 		return nil, err
@@ -238,6 +251,18 @@ func ResolveSelectedLinkMappings(
 	}
 
 	return selected, nil
+}
+
+func rejectInvalidTargetScope(targetCount, selectorCount, collectionCount int, all bool) error {
+	if targetCount == 0 {
+		return nil
+	}
+	if all || collectionCount > 0 || selectorCount != 1 {
+		return fmt.Errorf(
+			"--target can only be used with one selector (run separate commands when narrowing by target)",
+		)
+	}
+	return nil
 }
 
 func normalizeTargetSelectors(targets []string, env Env) (map[string]string, error) {
