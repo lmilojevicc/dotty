@@ -1961,7 +1961,10 @@ packages = ["scripts", "zsh"]
 
 	for _, args := range [][]string{
 		{"link", "--all", "scripts", "--target", ""},
+		{"link", "--collection", "terminal", "--target", ""},
 		{"link", "--track", "scripts/docx2pdf", "zsh/.zshrc", "--target", ""},
+		{"unlink", "--all", "--target", ""},
+		{"unlink", "--collection", "terminal", "--target", ""},
 		{"unlink", "--untrack", "scripts/docx2pdf", "zsh/.zshrc", "--target", ""},
 	} {
 		choices, directive, errOut, err := executeCompletionResult(
@@ -1981,7 +1984,7 @@ packages = ["scripts", "zsh"]
 	}
 }
 
-func TestTargetFlagCompletesManifestTargets(t *testing.T) {
+func TestTargetFlagsUseFilesystemCompletion(t *testing.T) {
 	_, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
 
@@ -2000,22 +2003,14 @@ links = [
 	tests := []struct {
 		name string
 		args []string
-		want []string
 	}{
+		{name: "track", args: []string{"track", "scripts/docx2pdf", "--target", ""}},
+		{name: "untrack", args: []string{"untrack", "scripts/docx2pdf", "--target", ""}},
+		{name: "link", args: []string{"link", "scripts", "--target", ""}},
+		{name: "unlink", args: []string{"unlink", "scripts", "--target", "~/.local/bin/s"}},
 		{
-			name: "link package scoped",
-			args: []string{"link", "scripts", "--target", ""},
-			want: []string{"~/.local/bin/docx2pdf", "~/.local/bin/sesh-fzf"},
-		},
-		{
-			name: "unlink prefix",
-			args: []string{"unlink", "scripts", "--target", "~/.local/bin/s"},
-			want: []string{"~/.local/bin/sesh-fzf"},
-		},
-		{
-			name: "repeated target omitted",
+			name: "repeated target still filesystem",
 			args: []string{"link", "scripts", "--target", "~/.local/bin/docx2pdf", "--target", ""},
-			want: []string{"~/.local/bin/sesh-fzf"},
 		},
 	}
 
@@ -2026,11 +2021,11 @@ links = [
 			if err != nil {
 				t.Fatalf("target completion failed: %v\nstderr: %s", err, errOut)
 			}
-			requireChoices(t, choices, tt.want)
-			if directive != cobra.ShellCompDirectiveNoFileComp {
+			requireChoices(t, choices, nil)
+			if directive != cobra.ShellCompDirectiveDefault {
 				t.Fatalf(
 					"unexpected target directive: want %d, got %d",
-					cobra.ShellCompDirectiveNoFileComp,
+					cobra.ShellCompDirectiveDefault,
 					directive,
 				)
 			}

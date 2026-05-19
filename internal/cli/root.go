@@ -172,7 +172,7 @@ func (a *app) trackCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
 	cmd.Flags().StringArrayVar(&targets, "target", nil, "target to track (can be repeated)")
-	mustRegisterFlagCompletion(cmd, "target", completeFilesystemPaths)
+	mustRegisterFlagCompletion(cmd, "target", a.completeTargetFlag)
 	return cmd
 }
 
@@ -209,7 +209,7 @@ func (a *app) untrackCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
 	cmd.Flags().StringArrayVar(&targets, "target", nil, "target to untrack (can be repeated)")
-	mustRegisterFlagCompletion(cmd, "target", a.completeTargets)
+	mustRegisterFlagCompletion(cmd, "target", a.completeTargetFlag)
 	return cmd
 }
 
@@ -259,7 +259,7 @@ func (a *app) linkCommand() *cobra.Command {
 	cmd.Flags().
 		BoolVar(&track, "track", false, "add missing manifest entries before linking explicit targets")
 	cmd.Flags().StringArrayVar(&targets, "target", nil, "target to link (can be repeated)")
-	mustRegisterFlagCompletion(cmd, "target", a.completeTargets)
+	mustRegisterFlagCompletion(cmd, "target", a.completeTargetFlag)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
 	return cmd
 }
@@ -311,7 +311,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 	cmd.Flags().
 		BoolVar(&untrack, "untrack", false, "remove selected manifest entries after unlinking")
 	cmd.Flags().StringArrayVar(&targets, "target", nil, "target to unlink (can be repeated)")
-	mustRegisterFlagCompletion(cmd, "target", a.completeTargets)
+	mustRegisterFlagCompletion(cmd, "target", a.completeTargetFlag)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
 	return cmd
 }

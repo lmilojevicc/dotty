@@ -106,14 +106,6 @@ func completeDirectories(
 	return nil, cobra.ShellCompDirectiveFilterDirs
 }
 
-func completeFilesystemPaths(
-	cmd *cobra.Command,
-	args []string,
-	toComplete string,
-) ([]string, cobra.ShellCompDirective) {
-	return nil, cobra.ShellCompDirectiveDefault
-}
-
 func (a *app) completeLinkArgs(
 	cmd *cobra.Command,
 	args []string,
@@ -287,12 +279,6 @@ func (a *app) completeTargets(
 	args []string,
 	toComplete string,
 ) ([]string, cobra.ShellCompDirective) {
-	if useFilesystem, valid := filesystemTargetCompletion(cmd, args); useFilesystem {
-		return nil, cobra.ShellCompDirectiveDefault
-	} else if !valid {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-
 	manifest, _, env, err := a.completionManifest()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -308,23 +294,29 @@ func (a *app) completeTargets(
 	return completeStrings(targets, selected, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
-func filesystemTargetCompletion(
+func (a *app) completeTargetFlag(
 	cmd *cobra.Command,
 	args []string,
-) (useFilesystem bool, valid bool) {
-	if cmd.Name() != "link" {
-		return false, true
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	if !targetFlagScopeIsValid(cmd, args) {
+		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	track, _ := cmd.Flags().GetBool("track")
-	if !track {
-		return false, true
-	}
+	return nil, cobra.ShellCompDirectiveDefault
+}
+
+func targetFlagScopeIsValid(cmd *cobra.Command, args []string) bool {
 	all, _ := cmd.Flags().GetBool("all")
 	collections, _ := cmd.Flags().GetStringArray("collection")
-	if all || len(collections) > 0 || len(args) != 1 {
-		return false, false
+	if all || len(collections) > 0 {
+		return false
 	}
-	return true, true
+	switch cmd.Name() {
+	case "link", "unlink":
+		return len(args) <= 1
+	default:
+		return true
+	}
 }
 
 func positionalTargetCompletions(cmd *cobra.Command, args []string) []string {

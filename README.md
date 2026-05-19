@@ -188,7 +188,7 @@ dotty completion fish
 dotty completion powershell
 ```
 
-Generated completions suggest Dotty-aware values when the manifest can be resolved: packages, `package/source` selectors, collections, status states, and mapped targets for `--target`. `track` completes repository sources and then falls back to filesystem target completion. Path arguments such as `dotty add <tab>`, `dotty init <tab>`, `dotty track <selector> <tab>`, and `--repo <tab>` keep filesystem completion.
+Generated completions suggest Dotty-aware values when the manifest can be resolved: packages, `package/source` selectors, collections, and status states. Every `--target` flag uses normal filesystem path completion, like entering a path in the shell. Path arguments such as `dotty add <tab>`, `dotty init <tab>`, `dotty track <selector> <tab>`, and `--repo <tab>` also keep filesystem completion.
 
 Example local installs:
 
