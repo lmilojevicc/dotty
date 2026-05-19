@@ -230,24 +230,18 @@ func (a *app) linkCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			selectors, err := parseSelectors(args)
+			if err != nil {
+				return err
+			}
 			options := dotty.LinkOptions{
+				Selectors:   selectors,
 				Collections: collections,
 				Targets:     targets,
 				All:         all,
 				Force:       force,
 				Track:       track,
 				DryRun:      dryRun,
-			}
-			if track {
-				for _, arg := range args {
-					selector, err := dotty.ParseSelector(arg)
-					if err != nil {
-						return err
-					}
-					options.Selectors = append(options.Selectors, selector)
-				}
-			} else {
-				options.Packages = args
 			}
 			linked, err := svc.Link(options)
 			if err != nil {
@@ -287,24 +281,18 @@ func (a *app) unlinkCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			selectors, err := parseSelectors(args)
+			if err != nil {
+				return err
+			}
 			options := dotty.UnlinkOptions{
+				Selectors:   selectors,
 				Collections: collections,
 				Targets:     targets,
 				All:         all,
 				LeaveCopy:   leaveCopy,
 				Untrack:     untrack,
 				DryRun:      dryRun,
-			}
-			if untrack {
-				for _, arg := range args {
-					selector, err := dotty.ParseSelector(arg)
-					if err != nil {
-						return err
-					}
-					options.Selectors = append(options.Selectors, selector)
-				}
-			} else {
-				options.Packages = args
 			}
 			unlinked, err := svc.Unlink(options)
 			if err != nil {
@@ -451,6 +439,18 @@ func selectionArgs(collections *[]string, all *bool) cobra.PositionalArgs {
 		}
 		return nil
 	}
+}
+
+func parseSelectors(args []string) ([]dotty.Selector, error) {
+	selectors := make([]dotty.Selector, 0, len(args))
+	for _, arg := range args {
+		selector, err := dotty.ParseSelector(arg)
+		if err != nil {
+			return nil, err
+		}
+		selectors = append(selectors, selector)
+	}
+	return selectors, nil
 }
 
 func usageError(cmd *cobra.Command) error {

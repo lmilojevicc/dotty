@@ -126,8 +126,10 @@ func (s Service) resolveLinkSelections(
 	}
 	if len(options.Selectors) > 0 {
 		return ResolveSelectors(manifest, ResolveOptions{
-			Selectors: options.Selectors,
-			Targets:   options.Targets,
+			Selectors:   options.Selectors,
+			Collections: options.Collections,
+			Targets:     options.Targets,
+			All:         options.All,
 		}, s.Env)
 	}
 	return ResolveSelectedLinkMappings(

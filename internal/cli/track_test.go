@@ -56,6 +56,40 @@ links = [
 `)
 }
 
+func TestLinkAndUnlinkAcceptPackageSourceSelector(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+]
+`)
+	source := filepath.Join(repo, "scripts", "docx2pdf")
+	writeTextFile(t, source, "#!/bin/sh\n")
+	target := filepath.Join(home, ".local", "bin", "docx2pdf")
+
+	out, errOut, err := executeCommand("--repo", repo, "link", "scripts/docx2pdf")
+	if err != nil {
+		t.Fatalf("link package/source failed: %v\nstderr: %s", err, errOut)
+	}
+	if out != "linked scripts/docx2pdf -> ~/.local/bin/docx2pdf\n" {
+		t.Fatalf("unexpected link output: %q", out)
+	}
+	assertSymlink(t, target, source)
+
+	out, errOut, err = executeCommand("--repo", repo, "unlink", "scripts/docx2pdf")
+	if err != nil {
+		t.Fatalf("unlink package/source failed: %v\nstderr: %s", err, errOut)
+	}
+	if out != "unlinked scripts/docx2pdf -> ~/.local/bin/docx2pdf\n" {
+		t.Fatalf("unexpected unlink output: %q", out)
+	}
+	if _, err := os.Lstat(target); err == nil || !os.IsNotExist(err) {
+		t.Fatalf("target still exists after unlink package/source: %v", err)
+	}
+}
+
 func TestTrackCommandAddsMappingsAndPrintsResults(t *testing.T) {
 	home, repo := setupCLITest(t)
 	writeManifest(t, repo, "version = 1\n")

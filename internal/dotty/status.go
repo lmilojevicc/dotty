@@ -178,10 +178,7 @@ func (s Service) statusSelections(
 				selector.Package,
 			)
 		}
-		selected = append(
-			selected,
-			statusSelection{Package: selector.Package, Source: selector.Source},
-		)
+		selected = append(selected, statusSelection(selector))
 	}
 	return selected, nil
 }

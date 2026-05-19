@@ -437,40 +437,6 @@ func containsSourceSelector(args []string) bool {
 	return false
 }
 
-func (a *app) completePackageSources(
-	packageName string,
-	toComplete string,
-) ([]string, cobra.ShellCompDirective) {
-	manifest, repo, _, err := a.completionManifest()
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	if _, ok := manifest.Packages[packageName]; !ok {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-
-	packageRoot := dotty.PackageRoot(repo, packageName)
-	choices := []string{}
-	err = filepath.WalkDir(packageRoot, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == packageRoot {
-			return nil
-		}
-		rel, err := filepath.Rel(packageRoot, path)
-		if err != nil {
-			return err
-		}
-		choices = append(choices, filepath.ToSlash(rel))
-		return nil
-	})
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	return completeStrings(choices, nil, toComplete), cobra.ShellCompDirectiveNoFileComp
-}
-
 func manifestSelectorValues(manifest *dotty.Manifest) []string {
 	values := []string{}
 	seen := map[string]bool{}
@@ -521,12 +487,15 @@ func walkPackageSources(
 	seen map[string]bool,
 ) {
 	_ = filepath.WalkDir(packageRoot, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || path == packageRoot {
+		if err != nil {
+			return err
+		}
+		if path == packageRoot {
 			return nil
 		}
 		rel, err := filepath.Rel(packageRoot, path)
 		if err != nil {
-			return nil
+			return err
 		}
 		appendCompletionValue(values, seen, packageName+"/"+filepath.ToSlash(rel))
 		return nil
