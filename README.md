@@ -149,8 +149,8 @@ Competing package alternatives may declare the same target across packages. Dott
 | `dotty add <path> <package>`                                      | Adopt an existing file, directory, or symlink target.          | `--dry-run`                                                 |
 | `dotty track <selector> [target...]`                              | Add manifest entries without changing target-side files.       | `--target`, `--dry-run`                                     |
 | `dotty untrack <selector> [target...]`                            | Remove manifest entries without changing target-side files.    | `--target`, `--dry-run`                                     |
-| `dotty link <package>... \| --all \| --collection <collection>`   | Create links for selected packages or `package/source` values. | `--all`, `--collection`, `--target`, `--track`, `--force`, `--dry-run` |
-| `dotty unlink <package>... \| --all \| --collection <collection>` | Remove links for selected packages or `package/source` values. | `--all`, `--collection`, `--target`, `--leave-copy`, `--untrack`, `--dry-run` |
+| `dotty link <selector>... \| --all \| --collection <collection>`  | Create links for selected packages or `package/source` values. | `--all`, `--collection`, `--target`, `--track`, `--force`, `--dry-run` |
+| `dotty unlink <selector>... \| --all \| --collection <collection>` | Remove links for selected packages or `package/source` values. | `--all`, `--collection`, `--target`, `--leave-copy`, `--untrack`, `--dry-run` |
 | `dotty status [<selector>...]`                                    | Show state inferred from the manifest and filesystem.          | `--state`, `--verbose`, `-v`                                |
 | `dotty list [<package>]`                                          | List packages and collections, or one package's entries.       | None                                                        |
 | `dotty repo`                                                      | Show the resolved repository and config file path.             | None                                                        |

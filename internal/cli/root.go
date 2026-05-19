@@ -221,7 +221,7 @@ func (a *app) linkCommand() *cobra.Command {
 	var track bool
 	var dryRun bool
 	cmd := &cobra.Command{
-		Use:               "link <package>... | --all | --collection <collection>",
+		Use:               "link <selector>... | --all | --collection <collection>",
 		Short:             "Create links for packages, all packages, or an explicit collection",
 		Args:              selectionArgs(&collections, &all),
 		ValidArgsFunction: a.completeLinkArgs,
@@ -272,7 +272,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 	var untrack bool
 	var dryRun bool
 	cmd := &cobra.Command{
-		Use:               "unlink <package>... | --all | --collection <collection>",
+		Use:               "unlink <selector>... | --all | --collection <collection>",
 		Short:             "Remove links for packages, all packages, or an explicit collection",
 		Args:              selectionArgs(&collections, &all),
 		ValidArgsFunction: a.completeUnlinkArgs,
@@ -320,7 +320,7 @@ func (a *app) statusCommand() *cobra.Command {
 	var verbose bool
 	var stateFilters []string
 	cmd := &cobra.Command{
-		Use:               "status [<package>...]",
+		Use:               "status [<selector>...]",
 		Short:             "Show linked, unlinked, conflict, missing-source, empty, partial, and untracked states",
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: a.completeManifestAndRepoSelectors,

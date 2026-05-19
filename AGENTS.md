@@ -20,7 +20,7 @@
 - This is a single Go module (`module github.com/lmilojevicc/dotty`, Go 1.26) with packages `cmd/dotty`, `internal/cli`, and `internal/dotty`.
 - `cmd/dotty/main.go` only constructs `cli.NewRootCommand`; Cobra flags and rendering live in `internal/cli`.
 - When adding or changing Cobra commands and flags, also decide and test shell completion behavior, including dynamic Package or Collection completions when arguments reference Manifest inventory.
-- Core behavior lives in `internal/dotty`: manifest/config/path handling plus add/link/unlink/status/list and rollback helpers.
+- Core behavior lives in `internal/dotty`: manifest/config/path handling plus add/track/untrack/link/unlink/status/list and rollback helpers.
 - Repository resolution order is `--repo`, then `DOTTY_REPO`, then `~/.config/dotty/config.toml` via `XDG_CONFIG_HOME` when set.
 
 ## Dotty Semantics
@@ -29,8 +29,9 @@
 - Manifest state is explicit `dotty.toml` Link Mappings; command writes normalize TOML through `FormatManifest` and do not preserve comments or hand formatting.
 - Mutating operations should use `RunAtomic`/`Tx` rollback helpers; dry-run paths should plan and validate without writing files.
 - Link creation uses absolute symlinks; non-symlink content at a Target Path is a Conflict unless `--force` is explicit.
-- Soft `unlink` leaves a target-side copy, so a later `link` sees a Conflict and needs `--force`; `unlink --hard` removes only expected Dotty Links.
-- `status` infers state from filesystem plus Manifest and scans the Dotfiles Repository for Untracked Repository Content; `list` reports Manifest inventory only.
+- Default `unlink` removes only expected Dotty Links and leaves target paths absent; `unlink --leave-copy` writes target-side copies, so a later `link` sees a Conflict and needs `--force` unless the mapping is untracked.
+- `track` and `untrack` are Manifest-only operations; `link --track` and `unlink --untrack` compose Manifest updates with filesystem link/unlink changes atomically.
+- `status` accepts Package and Package Source selectors, infers state from filesystem plus Manifest, and scans the Dotfiles Repository for Untracked Repository Content; `list` reports Manifest inventory only and accepts Package selectors only.
 
 ## Tests
 

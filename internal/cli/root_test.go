@@ -556,13 +556,13 @@ func TestCommandSurfaceInventory(t *testing.T) {
 		},
 		{
 			name:  "link",
-			use:   "link <package>... | --all | --collection <collection>",
+			use:   "link <selector>... | --all | --collection <collection>",
 			short: "Create links for packages, all packages, or an explicit collection",
 			flags: []string{"all:", "collection:c", "dry-run:", "force:", "target:", "track:"},
 		},
 		{
 			name:  "unlink",
-			use:   "unlink <package>... | --all | --collection <collection>",
+			use:   "unlink <selector>... | --all | --collection <collection>",
 			short: "Remove links for packages, all packages, or an explicit collection",
 			flags: []string{
 				"all:",
@@ -575,7 +575,7 @@ func TestCommandSurfaceInventory(t *testing.T) {
 		},
 		{
 			name:  "status",
-			use:   "status [<package>...]",
+			use:   "status [<selector>...]",
 			short: "Show linked, unlinked, conflict, missing-source, empty, partial, and untracked states",
 			flags: []string{"state:", "verbose:v"},
 		},
@@ -676,7 +676,7 @@ func TestHelpVersionAndCompletionAreRepositoryIndependent(t *testing.T) {
 			name: "link help",
 			args: []string{"link", "--help"},
 			want: []string{
-				"Usage:\n  dotty link <package>... | --all | --collection <collection> [flags]\n",
+				"Usage:\n  dotty link <selector>... | --all | --collection <collection> [flags]\n",
 				"Options:\n      --all",
 				"  -c, --collection stringArray",
 				"      --force",
@@ -689,7 +689,7 @@ func TestHelpVersionAndCompletionAreRepositoryIndependent(t *testing.T) {
 			name: "unlink help",
 			args: []string{"unlink", "--help"},
 			want: []string{
-				"Usage:\n  dotty unlink <package>... | --all | --collection <collection> [flags]\n",
+				"Usage:\n  dotty unlink <selector>... | --all | --collection <collection> [flags]\n",
 				"Options:\n      --all",
 				"  -c, --collection stringArray",
 				"      --leave-copy",
@@ -702,7 +702,7 @@ func TestHelpVersionAndCompletionAreRepositoryIndependent(t *testing.T) {
 			name: "status help",
 			args: []string{"status", "--help"},
 			want: []string{
-				"Usage:\n  dotty status [<package>...] [flags]\n",
+				"Usage:\n  dotty status [<selector>...] [flags]\n",
 				"--state stringArray   filter by status state (can be repeated)",
 				"  -v, --verbose",
 				"Global options:\n      --repo string",
@@ -1223,9 +1223,9 @@ func TestRenderErrorFormatsUsageAndHints(t *testing.T) {
 	}{
 		{
 			name: "usage",
-			err:  fmt.Errorf("usage: dotty link <package>... | --all | --collection <collection>"),
+			err:  fmt.Errorf("usage: dotty link <selector>... | --all | --collection <collection>"),
 			want: "error: invalid arguments\n" +
-				"  usage: dotty link <package>... | --all | --collection <collection>\n",
+				"  usage: dotty link <selector>... | --all | --collection <collection>\n",
 		},
 		{
 			name: "hint",
@@ -2690,12 +2690,12 @@ func TestCommandArgumentDiagnosticsCoverInvalidShapes(t *testing.T) {
 		{
 			name: "link missing selector",
 			args: []string{"link"},
-			want: "usage: dotty link <package>... | --all | --collection <collection>",
+			want: "usage: dotty link <selector>... | --all | --collection <collection>",
 		},
 		{
 			name: "unlink missing selector",
 			args: []string{"unlink"},
-			want: "usage: dotty unlink <package>... | --all | --collection <collection>",
+			want: "usage: dotty unlink <selector>... | --all | --collection <collection>",
 		},
 		{
 			name: "list too many args",
@@ -3020,12 +3020,12 @@ func TestCommandArgumentErrorsIncludeSampleUsage(t *testing.T) {
 		{
 			name: "link missing selector",
 			args: []string{"link"},
-			want: "usage: dotty link <package>... | --all | --collection <collection>",
+			want: "usage: dotty link <selector>... | --all | --collection <collection>",
 		},
 		{
 			name: "unlink missing selector",
 			args: []string{"unlink"},
-			want: "usage: dotty unlink <package>... | --all | --collection <collection>",
+			want: "usage: dotty unlink <selector>... | --all | --collection <collection>",
 		},
 		{
 			name: "list too many args",
