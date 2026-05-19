@@ -131,7 +131,7 @@ func (s Service) planAdd(
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf(
-				"target %s does not exist (choose an existing Target Path)",
+				"target %s does not exist (choose an existing target)",
 				targetAbs,
 			)
 		}
@@ -204,8 +204,8 @@ func (s Service) planAdd(
 	if destExists {
 		if !sameExistingPath(dest, adoptPath) {
 			return nil, fmt.Errorf(
-				"repo-side package source %s already exists (remove or rename the existing Package Source, or choose a different Package)",
-				dest,
+				"%s already has tracked content (use --force to replace it, or choose another source path)",
+				selectorLabel(packageName, filepath.ToSlash(sourceRel)),
 			)
 		}
 		if !symlinkAdoption {
@@ -221,8 +221,8 @@ func (s Service) planAdd(
 			return nil, err
 		} else if externalHardlinks {
 			return nil, fmt.Errorf(
-				"repo-side package source %s has external hardlink aliases (copy it into the Dotfiles Repository before adding)",
-				dest,
+				"%s has external hardlink aliases (copy it into the repository before adding)",
+				selectorLabel(packageName, filepath.ToSlash(sourceRel)),
 			)
 		}
 	} else if symlinkAdoption {

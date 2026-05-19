@@ -12,6 +12,7 @@ type TrackResult struct {
 	Package string
 	Source  string
 	Target  string
+	Added   bool
 	DryRun  bool
 }
 
@@ -77,9 +78,9 @@ func (s Service) planTrack(manifest *Manifest, options TrackOptions) ([]TrackRes
 		return nil, err
 	} else if !exists {
 		return nil, fmt.Errorf(
-			"package %q source %q is missing (choose an existing Package Source)",
-			options.Selector.Package,
-			source,
+			"%s is missing from the repository (create it first, or use `dotty add <target> %s` to adopt target-side content)",
+			selectorLabel(options.Selector.Package, source),
+			selectorLabel(options.Selector.Package, source),
 		)
 	}
 	if err := validateSupportedSourcePath(sourceAbs); err != nil {
@@ -96,6 +97,7 @@ func (s Service) planTrack(manifest *Manifest, options TrackOptions) ([]TrackRes
 			return nil, err
 		}
 		link := LinkMapping{Source: source, Target: storedTarget}
+		added := !manifestHasLink(manifest, options.Selector.Package, link)
 		if err := AddManifestLink(manifest, options.Selector.Package, link, s.Env); err != nil {
 			return nil, err
 		}
@@ -111,8 +113,19 @@ func (s Service) planTrack(manifest *Manifest, options TrackOptions) ([]TrackRes
 			Package: options.Selector.Package,
 			Source:  source,
 			Target:  storedTarget,
+			Added:   added,
 			DryRun:  options.DryRun,
 		})
 	}
 	return results, nil
+}
+
+func manifestHasLink(manifest *Manifest, packageName string, link LinkMapping) bool {
+	pkg := manifest.Packages[packageName]
+	for _, existing := range pkg.Links {
+		if existing.Source == link.Source && existing.Target == link.Target {
+			return true
+		}
+	}
+	return false
 }

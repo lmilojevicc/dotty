@@ -39,7 +39,7 @@ func renderAddResult(out io.Writer, result *dotty.AddResult) {
 		out,
 		"%s %s: %s -> %s\n",
 		successStyle.Render(verb),
-		packageStyle.Render(result.Package),
+		packageStyle.Render(displaySelector(result.Package, result.Source)),
 		pathStyle.Render(result.Target),
 		pathStyle.Render(result.SourcePath),
 	)
@@ -47,31 +47,40 @@ func renderAddResult(out io.Writer, result *dotty.AddResult) {
 
 func renderLinkResults(out io.Writer, results []dotty.LinkResult) {
 	for _, result := range results {
-		verb := "linked"
+		verb := linkResultVerb(result)
 		if result.DryRun {
-			verb = linkDryRunVerb(result.Action)
+			verb = linkDryRunVerb(result.Action, result.Tracked)
 		}
 		fmt.Fprintf(
 			out,
-			"%s %s: %s -> %s\n",
+			"%s %s -> %s\n",
 			successStyle.Render(verb),
-			packageStyle.Render(result.Package),
+			packageStyle.Render(displaySelector(result.Package, result.Source)),
 			pathStyle.Render(result.Target),
-			pathStyle.Render(result.SourcePath),
 		)
 	}
 }
 
-func linkDryRunVerb(action string) string {
+func linkResultVerb(result dotty.LinkResult) string {
+	if result.Tracked {
+		return "tracked and linked"
+	}
+	return "linked"
+}
+
+func linkDryRunVerb(action string, tracked bool) string {
+	if tracked {
+		return "would track and link"
+	}
 	switch action {
 	case dotty.LinkResultActionCreate:
-		return "would create link"
+		return "would link"
 	case dotty.LinkResultActionNoop:
 		return "already linked"
 	case dotty.LinkResultActionNormalize:
-		return "would normalize link"
+		return "would link"
 	case dotty.LinkResultActionReplaceConflict:
-		return "would replace conflict"
+		return "would replace and link"
 	default:
 		return "would link"
 	}
@@ -79,39 +88,80 @@ func linkDryRunVerb(action string) string {
 
 func renderUnlinkResults(out io.Writer, results []dotty.UnlinkResult) {
 	for _, result := range results {
-		verb := "unlinked"
-		note := "link removed"
-		if result.LeaveCopy {
-			note = "copy left"
-		}
-		if result.DryRun {
-			verb, note = unlinkDryRunVerbAndNote(result.Action, result.LeaveCopy)
-		}
-		fmt.Fprintf(
-			out,
-			"%s %s: %s (%s)\n",
-			successStyle.Render(verb),
-			packageStyle.Render(result.Package),
-			pathStyle.Render(result.Target),
-			mutedStyle.Render(note),
-		)
+		renderUnlinkResult(out, result)
 	}
 }
 
-func unlinkDryRunVerbAndNote(action string, leaveCopy bool) (string, string) {
-	switch action {
-	case dotty.UnlinkResultActionCopySource:
-		return "would copy Package Source", "leave-copy"
-	case dotty.UnlinkResultActionRemoveLink:
-		return "would remove link", "link removed"
-	case dotty.UnlinkResultActionNoop:
-		return "already absent", "no-op"
-	default:
-		if leaveCopy {
-			return "would leave copy", "copy left"
-		}
-		return "would remove link", "link removed"
+func renderUnlinkResult(out io.Writer, result dotty.UnlinkResult) {
+	selector := packageStyle.Render(displaySelector(result.Package, result.Source))
+	target := pathStyle.Render(result.Target)
+	if result.DryRun {
+		fmt.Fprintf(
+			out,
+			"%s %s -> %s\n",
+			successStyle.Render(unlinkDryRunVerb(result)),
+			selector,
+			target,
+		)
+		return
 	}
+	verb := unlinkResultVerb(result)
+	note := unlinkResultNote(result)
+	if note != "" {
+		fmt.Fprintf(
+			out,
+			"%s %s -> %s %s\n",
+			successStyle.Render(verb),
+			selector,
+			target,
+			mutedStyle.Render(note),
+		)
+		return
+	}
+	fmt.Fprintf(out, "%s %s -> %s\n", successStyle.Render(verb), selector, target)
+}
+
+func unlinkDryRunVerb(result dotty.UnlinkResult) string {
+	if result.Untracked && result.LeaveCopy {
+		return "would leave copy and untrack"
+	}
+	if result.Untracked {
+		return "would unlink and untrack"
+	}
+	if result.Action == dotty.UnlinkResultActionCopySource {
+		return "would leave copy"
+	}
+	if result.Action == dotty.UnlinkResultActionNoop {
+		return "already absent"
+	}
+	return "would unlink"
+}
+
+func unlinkResultVerb(result dotty.UnlinkResult) string {
+	if result.Untracked && result.LeaveCopy {
+		return "left copy and untracked"
+	}
+	if result.Untracked && result.Action == dotty.UnlinkResultActionRemoveLink {
+		return "unlinked and untracked"
+	}
+	if result.Untracked {
+		return "untracked"
+	}
+	return "unlinked"
+}
+
+func unlinkResultNote(result dotty.UnlinkResult) string {
+	if result.Untracked && result.Action == dotty.UnlinkResultActionNoop {
+		return "(target left unchanged)"
+	}
+	if result.LeaveCopy && result.Action == dotty.UnlinkResultActionCopySource &&
+		!result.Untracked {
+		return "(copy left)"
+	}
+	if result.Action == dotty.UnlinkResultActionNoop && !result.Untracked {
+		return "(already absent)"
+	}
+	return ""
 }
 
 func renderTrackResults(out io.Writer, results []dotty.TrackResult) {
@@ -122,11 +172,10 @@ func renderTrackResults(out io.Writer, results []dotty.TrackResult) {
 		}
 		fmt.Fprintf(
 			out,
-			"%s %s: %s -> %s\n",
+			"%s %s -> %s\n",
 			successStyle.Render(verb),
-			packageStyle.Render(result.Package),
+			packageStyle.Render(displaySelector(result.Package, result.Source)),
 			pathStyle.Render(result.Target),
-			sourceStyle.Render(result.Source),
 		)
 	}
 }
@@ -137,20 +186,28 @@ func renderUntrackResults(out io.Writer, results []dotty.UntrackResult) {
 		if result.DryRun {
 			verb = "would untrack"
 		}
-		note := ""
-		if result.LinkExists {
-			note = " (link still exists)"
-		}
 		fmt.Fprintf(
 			out,
-			"%s %s: %s -> %s%s\n",
+			"%s %s -> %s\n",
 			successStyle.Render(verb),
-			packageStyle.Render(result.Package),
+			packageStyle.Render(displaySelector(result.Package, result.Source)),
 			pathStyle.Render(result.Target),
-			sourceStyle.Render(result.Source),
-			mutedStyle.Render(note),
 		)
+		if result.LinkExists {
+			fmt.Fprintf(
+				out,
+				"%s\n",
+				mutedStyle.Render("note: target-side link at "+result.Target+" was not removed"),
+			)
+		}
 	}
+}
+
+func displaySelector(packageName, source string) string {
+	if source == "" || source == "." {
+		return packageName
+	}
+	return packageName + "/" + source
 }
 
 func renderStatus(out io.Writer, report *dotty.StatusReport, verbose bool) {
@@ -350,7 +407,7 @@ func renderInventory(out io.Writer, inventory *dotty.Inventory) {
 }
 
 func renderInventoryPackageDetail(out io.Writer, pkg *dotty.InventoryPackage) {
-	fmt.Fprintf(out, "%s %s\n", packageStyle.Render("Package"), packageStyle.Render(pkg.Name))
+	fmt.Fprintf(out, "%s\n", packageStyle.Render(pkg.Name))
 	if len(pkg.Links) == 0 {
 		fmt.Fprintf(out, "  %s\n", mutedStyle.Render("no links"))
 		return
@@ -372,7 +429,7 @@ func renderState(state dotty.State) string {
 func renderStateWithBlockedBy(state dotty.State, blockedBy string) string {
 	label := string(state)
 	if state == dotty.StateBlocked && blockedBy != "" {
-		label += " by " + blockedBy
+		label += " linked by " + blockedBy
 	}
 	if style, ok := stateStyles[state]; ok {
 		return style.Render(label)

@@ -127,8 +127,8 @@ links = [
 		t.Fatalf("link failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "linked zsh: ~/.zshrc -> ~/dotfiles/zsh/.zshrc\n" +
-		"linked zsh: ~/secrets/.zshrc_secrets -> ~/dotfiles/zsh/.zshrc_secrets\n"
+	want := "linked zsh/.zshrc -> ~/.zshrc\n" +
+		"linked zsh/.zshrc_secrets -> ~/secrets/.zshrc_secrets\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -170,7 +170,7 @@ links = [
 		t.Fatalf("link --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "would replace conflict zsh: ~/.zshrc -> ~/dotfiles/zsh/.zshrc\n"
+	want := "would replace and link zsh/.zshrc -> ~/.zshrc\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -204,7 +204,7 @@ links = [
 		t.Fatalf("link --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "would create link zsh: ~/.zshrc -> ~/dotfiles/zsh/.zshrc\n"
+	want := "would link zsh/.zshrc -> ~/.zshrc\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -269,10 +269,10 @@ links = [
 		t.Fatalf("link --force --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "would create link config: ~/.absent -> ~/dotfiles/config/absent\n" +
-		"already linked config: ~/.linked -> ~/dotfiles/config/linked\n" +
-		"would normalize link config: ~/.relative -> ~/dotfiles/config/relative\n" +
-		"would replace conflict config: ~/.conflict -> ~/dotfiles/config/conflict\n"
+	want := "would link config/absent -> ~/.absent\n" +
+		"already linked config/linked -> ~/.linked\n" +
+		"would link config/relative -> ~/.relative\n" +
+		"would replace and link config/conflict -> ~/.conflict\n"
 	if out != want {
 		t.Fatalf("unexpected detailed link dry-run output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -310,7 +310,7 @@ links = [
 		t.Fatalf("unlink failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "unlinked tmux: ~/.config/tmux (link removed)\n"
+	want := "unlinked tmux -> ~/.config/tmux\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -343,7 +343,7 @@ links = [
 		t.Fatalf("unlink --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "would remove link zsh: ~/.zshrc (link removed)\n"
+	want := "would unlink zsh/.zshrc -> ~/.zshrc\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -391,8 +391,8 @@ links = [
 	if err != nil {
 		t.Fatalf("unlink --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
-	want := "would copy Package Source config: ~/.linked (leave-copy)\n" +
-		"would copy Package Source config: ~/.absent (leave-copy)\n"
+	want := "would leave copy config/linked -> ~/.linked\n" +
+		"would leave copy config/absent -> ~/.absent\n"
 	if out != want {
 		t.Fatalf("unexpected soft unlink dry-run output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -401,8 +401,8 @@ links = [
 	if err != nil {
 		t.Fatalf("unlink --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
-	want = "would remove link config: ~/.linked (link removed)\n" +
-		"already absent config: ~/.absent (no-op)\n"
+	want = "would unlink config/linked -> ~/.linked\n" +
+		"already absent config/absent -> ~/.absent\n"
 	if out != want {
 		t.Fatalf("unexpected default unlink dry-run output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -436,7 +436,7 @@ links = [
 		t.Fatalf("unlink --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "would remove link zsh: ~/.zshrc (link removed)\n"
+	want := "would unlink zsh/.zshrc -> ~/.zshrc\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -1243,9 +1243,9 @@ func TestRenderErrorFormatsUsageAndHints(t *testing.T) {
 		},
 		{
 			name: "choose hint",
-			err:  fmt.Errorf("target /tmp/missing does not exist (choose an existing Target Path)"),
+			err:  fmt.Errorf("target /tmp/missing does not exist (choose an existing target)"),
 			want: "error: target /tmp/missing does not exist\n" +
-				"hint: choose an existing Target Path\n",
+				"hint: choose an existing target\n",
 		},
 		{
 			name: "remove hint",
@@ -2142,7 +2142,7 @@ links = [
 		t.Fatalf("list scripts failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "Package scripts\n" +
+	want := "scripts\n" +
 		"  docx2pdf -> ~/.local/bin/docx2pdf\n" +
 		"  sesh-fzf -> ~/.local/bin/sesh-fzf\n"
 	if out != want {
@@ -2161,7 +2161,8 @@ links = [
 `)
 
 	_, _, err := executeCommand("--repo", repo, "list", "scripts/docx2pdf")
-	if err == nil || !strings.Contains(err.Error(), "list accepts packages only") {
+	if err == nil ||
+		!strings.Contains(err.Error(), "list accepts packages, not package/source selectors") {
 		t.Fatalf("expected package-only list error, got %v", err)
 	}
 }
@@ -2495,8 +2496,8 @@ packages = ["tmux", "zsh"]
 	if err != nil {
 		t.Fatalf("link package plus collection failed: %v\nstderr: %s", err, errOut)
 	}
-	want := "linked zsh: ~/.zshrc -> ~/dotfiles/zsh/.zshrc\n" +
-		"linked tmux: ~/.config/tmux -> ~/dotfiles/tmux\n"
+	want := "linked zsh/.zshrc -> ~/.zshrc\n" +
+		"linked tmux -> ~/.config/tmux\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -2536,8 +2537,8 @@ links = [
 	if err != nil {
 		t.Fatalf("link --all failed: %v\nstderr: %s", err, errOut)
 	}
-	want := "linked tmux: ~/.config/tmux -> ~/dotfiles/tmux\n" +
-		"linked zsh: ~/.zshrc -> ~/dotfiles/zsh/.zshrc\n"
+	want := "linked tmux -> ~/.config/tmux\n" +
+		"linked zsh/.zshrc -> ~/.zshrc\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -2569,7 +2570,7 @@ links = [
 	if err != nil {
 		t.Fatalf("unlink failed: %v\nstderr: %s", err, errOut)
 	}
-	want := "unlinked zsh: ~/.zshrc (link removed)\n"
+	want := "unlinked zsh/.zshrc -> ~/.zshrc\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -2622,8 +2623,8 @@ links = [
 	if err != nil {
 		t.Fatalf("unlink --all failed: %v\nstderr: %s", err, errOut)
 	}
-	want := "unlinked tmux: ~/.config/tmux (copy left)\n" +
-		"unlinked zsh: ~/.zshrc (copy left)\n"
+	want := "unlinked tmux -> ~/.config/tmux (copy left)\n" +
+		"unlinked zsh/.zshrc -> ~/.zshrc (copy left)\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -2880,22 +2881,20 @@ packages = ["zsh"]
 			{
 				name: "target conflict",
 				args: []string{"--repo", repo, "link", "zsh"},
-				want: fmt.Sprintf(
-					"error: target %s already exists\nhint: use --force to move it aside and create the Link\n",
-					conflictTarget,
-				),
+				want: "error: target ~/.zshrc already exists\n" +
+					"hint: use --force --dry-run to preview replacing it\n",
 			},
 			{
 				name: "missing source",
 				args: []string{"--repo", repo, "link", "tmux"},
-				want: "error: package \"tmux\" source \".\" is missing\n" +
-					"hint: restore the Package Source or remove the Link Mapping from dotty.toml\n",
+				want: "error: tmux is missing from the repository\n" +
+					"hint: restore it, or run `dotty untrack tmux` to remove the manifest entry\n",
 			},
 			{
 				name: "missing add target",
 				args: []string{"--repo", repo, "add", filepath.Join(home, ".missing"), "ghostty"},
 				want: fmt.Sprintf(
-					"error: target %s does not exist\nhint: choose an existing Target Path\n",
+					"error: target %s does not exist\nhint: choose an existing target\n",
 					filepath.Join(home, ".missing"),
 				),
 			},

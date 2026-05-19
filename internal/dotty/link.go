@@ -19,9 +19,11 @@ type LinkOptions struct {
 
 type LinkResult struct {
 	Package    string
+	Source     string
 	Target     string
 	SourcePath string
 	Action     string
+	Tracked    bool
 	DryRun     bool
 }
 
@@ -31,6 +33,7 @@ type linkAction struct {
 	sourceAbs   string
 	targetAbs   string
 	state       linkTargetState
+	tracked     bool
 }
 
 type linkTargetState int
@@ -108,6 +111,7 @@ func (s Service) planLinkWithManifest(manifest *Manifest, options LinkOptions) (
 		if err != nil {
 			return nil, err
 		}
+		action.tracked = options.Track && mapping.Added
 		plan.actions = append(plan.actions, action)
 	}
 	return plan, nil
@@ -172,6 +176,7 @@ func (s Service) resolveTrackedLinkSelections(
 				Source: item.Source,
 				Target: item.Target,
 			},
+			Added: item.Added,
 		})
 	}
 	return selected, nil
@@ -186,10 +191,10 @@ func rejectCompetingSelectedLinkMappings(selected []SelectedLinkMapping, env Env
 		}
 		if previous, ok := seen[key]; ok {
 			return fmt.Errorf(
-				"competing selected mappings target %q from packages %q and %q (select only one alternative or use a narrower selector)",
+				"selected packages compete for %s (link only one of: %s, %s)",
 				item.Link.Target,
-				previous.Package,
-				item.Package,
+				selectorLabel(previous.Package, previous.Link.Source),
+				selectorLabel(item.Package, item.Link.Source),
 			)
 		}
 		seen[key] = item
@@ -218,9 +223,9 @@ func (s Service) classifyLinkAction(
 		return action, err
 	} else if !exists {
 		return action, fmt.Errorf(
-			"package %q source %q is missing (restore the Package Source or remove the Link Mapping from dotty.toml)",
-			packageName,
-			mapping.Source,
+			"%s is missing from the repository (restore it, or run `dotty untrack %s` to remove the manifest entry)",
+			selectorLabel(packageName, mapping.Source),
+			selectorLabel(packageName, mapping.Source),
 		)
 	}
 	if err := validateSupportedSourcePath(sourceAbs); err != nil {
@@ -230,9 +235,8 @@ func (s Service) classifyLinkAction(
 		return action, err
 	} else if externalHardlinks {
 		return action, fmt.Errorf(
-			"package %q source %q has external hardlink aliases (copy it into the Dotfiles Repository before linking)",
-			packageName,
-			mapping.Source,
+			"%s has external hardlink aliases (copy it into the repository before linking)",
+			selectorLabel(packageName, mapping.Source),
 		)
 	}
 
@@ -270,9 +274,10 @@ func (s Service) classifyLinkAction(
 			if !force {
 				if blocked {
 					return action, fmt.Errorf(
-						"target %s is blocked by package %q (use --force to switch alternatives)",
-						targetAbs,
+						"%s is linked by %s (use --force to switch it to %s, or link only one alternative)",
+						HomeRelative(targetAbs, s.Env),
 						blocker,
+						selectorLabel(packageName, mapping.Source),
 					)
 				}
 				targetText, _ := os.Readlink(targetAbs)
@@ -287,8 +292,8 @@ func (s Service) classifyLinkAction(
 	} else {
 		if !force {
 			return action, fmt.Errorf(
-				"target %s already exists (use --force to move it aside and create the Link)",
-				targetAbs,
+				"target %s already exists (use --force --dry-run to preview replacing it)",
+				HomeRelative(targetAbs, s.Env),
 			)
 		}
 		action.state = linkTargetNonSymlink
@@ -352,9 +357,11 @@ func (s Service) linkResults(plan *linkPlan, dryRun bool) []LinkResult {
 	for i, a := range plan.actions {
 		results[i] = LinkResult{
 			Package:    a.packageName,
+			Source:     a.mapping.Source,
 			Target:     a.mapping.Target,
 			SourcePath: HomeRelative(a.sourceAbs, s.Env),
 			Action:     linkResultAction(a.state),
+			Tracked:    a.tracked,
 			DryRun:     dryRun,
 		}
 	}

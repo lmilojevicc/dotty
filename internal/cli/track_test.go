@@ -43,7 +43,7 @@ func TestLinkTrackCommandAddsMappingAndCreatesLink(t *testing.T) {
 		t.Fatalf("link --track failed: %v\nstderr: %s", err, errOut)
 	}
 
-	if out != "linked scripts: ~/.local/bin/docx2pdf -> ~/dotfiles/scripts/docx2pdf\n" {
+	if out != "tracked and linked scripts/docx2pdf -> ~/.local/bin/docx2pdf\n" {
 		t.Fatalf("unexpected link --track output: %q", out)
 	}
 	assertSymlink(t, filepath.Join(home, ".local", "bin", "docx2pdf"), source)
@@ -71,8 +71,8 @@ func TestTrackCommandAddsMappingsAndPrintsResults(t *testing.T) {
 		t.Fatalf("track failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "tracked scripts: ~/.local/bin/docx2pdf -> docx2pdf\n" +
-		"tracked scripts: ~/bin/docx2pdf -> docx2pdf\n"
+	want := "tracked scripts/docx2pdf -> ~/.local/bin/docx2pdf\n" +
+		"tracked scripts/docx2pdf -> ~/bin/docx2pdf\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -111,7 +111,7 @@ links = [
 		t.Fatalf("unlink --untrack failed: %v\nstderr: %s", err, errOut)
 	}
 
-	if out != "unlinked scripts: ~/.local/bin/docx2pdf (link removed)\n" {
+	if out != "unlinked and untracked scripts/docx2pdf -> ~/.local/bin/docx2pdf\n" {
 		t.Fatalf("unexpected unlink --untrack output: %q", out)
 	}
 	if _, err := os.Lstat(target); err == nil || !os.IsNotExist(err) {
@@ -151,7 +151,8 @@ links = [
 		t.Fatalf("untrack failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "untracked scripts: ~/.local/bin/docx2pdf -> docx2pdf (link still exists)\n"
+	want := "untracked scripts/docx2pdf -> ~/.local/bin/docx2pdf\n" +
+		"note: target-side link at ~/.local/bin/docx2pdf was not removed\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -176,7 +177,7 @@ func TestTrackAndUntrackDryRunDoNotWriteManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("track --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
-	if out != "would track scripts: ~/.local/bin/docx2pdf -> docx2pdf\n" {
+	if out != "would track scripts/docx2pdf -> ~/.local/bin/docx2pdf\n" {
 		t.Fatalf("unexpected track dry-run output: %q", out)
 	}
 	requireFileContent(t, dotty.ManifestPath(repo), manifest)
@@ -195,7 +196,7 @@ links = [
 	if err != nil {
 		t.Fatalf("untrack --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
-	if out != "would untrack scripts: ~/.local/bin/docx2pdf -> docx2pdf\n" {
+	if out != "would untrack scripts/docx2pdf -> ~/.local/bin/docx2pdf\n" {
 		t.Fatalf("unexpected untrack dry-run output: %q", out)
 	}
 	requireFileContent(t, dotty.ManifestPath(repo), `version = 1

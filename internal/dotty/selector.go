@@ -30,7 +30,11 @@ func ParseSelector(arg string) (Selector, error) {
 		return Selector{Package: packageName}, nil
 	}
 	if source == "" {
-		return Selector{}, fmt.Errorf("empty source selector")
+		return Selector{}, fmt.Errorf(
+			"source selector in %q is empty (use %q to select the whole package)",
+			arg,
+			packageName,
+		)
 	}
 	if err := validateSourcePath(source); err != nil {
 		return Selector{}, err
@@ -44,4 +48,11 @@ func (s Selector) IsPackage() bool {
 
 func (s Selector) IsPackageSource() bool {
 	return s.Source != ""
+}
+
+func selectorLabel(packageName, source string) string {
+	if source == "" || source == "." {
+		return packageName
+	}
+	return packageName + "/" + source
 }

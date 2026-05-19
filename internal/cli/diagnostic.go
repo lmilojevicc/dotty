@@ -38,8 +38,11 @@ func splitDiagnosticHint(message string) (string, string) {
 func isDiagnosticHint(hint string) bool {
 	for _, prefix := range []string{
 		"choose ",
+		"create ",
 		"edit ",
 		"inspect ",
+		"link ",
+		"no changes ",
 		"or use ",
 		"remove ",
 		"restore ",

@@ -19,9 +19,11 @@ type UnlinkOptions struct {
 
 type UnlinkResult struct {
 	Package   string
+	Source    string
 	Target    string
 	Action    string
 	LeaveCopy bool
+	Untracked bool
 	DryRun    bool
 }
 
@@ -32,6 +34,7 @@ type unlinkAction struct {
 	copySourceAbs string
 	targetAbs     string
 	leaveCopy     bool
+	untrack       bool
 	state         unlinkTargetState
 }
 
@@ -90,9 +93,11 @@ func (s Service) unlinkResults(plan *unlinkPlan, dryRun bool) []UnlinkResult {
 	for i, a := range plan.actions {
 		results[i] = UnlinkResult{
 			Package:   a.packageName,
+			Source:    a.mapping.Source,
 			Target:    a.mapping.Target,
 			Action:    unlinkResultAction(a.state, a.leaveCopy),
 			LeaveCopy: a.leaveCopy,
+			Untracked: a.untrack,
 			DryRun:    dryRun,
 		}
 	}
@@ -215,7 +220,12 @@ func (s Service) classifyUnlinkAction(
 	leaveCopy bool,
 	allowUnexpectedTarget bool,
 ) (unlinkAction, error) {
-	action := unlinkAction{packageName: packageName, mapping: mapping, leaveCopy: leaveCopy}
+	action := unlinkAction{
+		packageName: packageName,
+		mapping:     mapping,
+		leaveCopy:   leaveCopy,
+		untrack:     allowUnexpectedTarget,
+	}
 
 	sourceAbs, err := packageSourcePathLexical(s.Repo, packageName, mapping.Source)
 	if leaveCopy {
@@ -249,9 +259,8 @@ func (s Service) classifyUnlinkAction(
 			return action, err
 		} else if !exists {
 			return action, fmt.Errorf(
-				"package %q source %q is missing (restore the Package Source or omit --leave-copy to remove only the Link)",
-				packageName,
-				mapping.Source,
+				"%s is missing from the repository (restore it, or omit --leave-copy to remove only the link)",
+				selectorLabel(packageName, mapping.Source),
 			)
 		}
 		copySourceAbs, err := unlinkCopySourcePath(sourceAbs)
@@ -263,9 +272,8 @@ func (s Service) classifyUnlinkAction(
 			return action, err
 		} else if !exists {
 			return action, fmt.Errorf(
-				"package %q source %q is missing (restore the Package Source or omit --leave-copy to remove only the Link)",
-				packageName,
-				mapping.Source,
+				"%s is missing from the repository (restore it, or omit --leave-copy to remove only the link)",
+				selectorLabel(packageName, mapping.Source),
 			)
 		}
 		if err := validateSupportedSourcePath(copySourceAbs); err != nil {
@@ -279,9 +287,8 @@ func (s Service) classifyUnlinkAction(
 			return action, err
 		} else if externalHardlinks {
 			return action, fmt.Errorf(
-				"package %q source %q has symlink referents with external hardlink aliases (copy them into the Dotfiles Repository before unlinking)",
-				packageName,
-				mapping.Source,
+				"%s has symlink referents with external hardlink aliases (copy them into the repository before unlinking)",
+				selectorLabel(packageName, mapping.Source),
 			)
 		}
 		if err := validateCopyablePath(copySourceAbs); err != nil {

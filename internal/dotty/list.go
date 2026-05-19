@@ -34,7 +34,10 @@ func (s Service) List(packageFilter ...string) (*Inventory, error) {
 			return nil, err
 		}
 		if selector.IsPackageSource() {
-			return nil, fmt.Errorf("list accepts packages only, not package/source selectors")
+			return nil, fmt.Errorf(
+				"list accepts packages, not package/source selectors (use `dotty list %s`)",
+				selector.Package,
+			)
 		}
 		pkg, ok := manifest.Packages[selector.Package]
 		if !ok {

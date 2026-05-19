@@ -69,20 +69,19 @@ func ValidateManifest(manifest *Manifest, env Env) error {
 			key := filepath.Clean(targetAbs)
 			if prev, ok := targets[key]; ok {
 				return fmt.Errorf(
-					"package %q target %q is mapped more than once (%s and %s) (edit dotty.toml so each Target Path appears once)",
-					name,
+					"%s is already mapped to %s (run `dotty untrack %s --target %s` first)",
 					link.Target,
-					prev,
-					link.Source,
+					selectorLabel(name, prev),
+					selectorLabel(name, prev),
+					link.Target,
 				)
 			}
 			for existingTarget, existingSource := range targets {
 				if targetPathsOverlap(existingTarget, key) {
 					return fmt.Errorf(
-						"package %q target %q overlaps target mapped by source %q (edit dotty.toml so Link Mapping Target Paths in one package do not contain each other)",
-						name,
+						"target %s overlaps existing target for %s (choose an exact target path)",
 						link.Target,
-						existingSource,
+						selectorLabel(name, existingSource),
 					)
 				}
 			}
@@ -166,8 +165,10 @@ func AddManifestLink(manifest *Manifest, packageName string, link LinkMapping, e
 		}
 		if existing.Target == link.Target {
 			return fmt.Errorf(
-				"package %q already maps target %q (edit dotty.toml to change the existing Link Mapping)",
-				packageName,
+				"%s is already mapped to %s (run `dotty untrack %s --target %s` first)",
+				link.Target,
+				selectorLabel(packageName, existing.Source),
+				selectorLabel(packageName, existing.Source),
 				link.Target,
 			)
 		}

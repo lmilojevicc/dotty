@@ -639,7 +639,7 @@ func TestAddRejectsMissingTargetWithoutChangingManifestOrRepository(t *testing.T
 
 	_, err = NewService(repo, env).Add(filepath.Join(home, ".missing"), "zsh")
 	requireErrorContains(t, err, "does not exist")
-	requireErrorContains(t, err, "choose an existing Target Path")
+	requireErrorContains(t, err, "choose an existing target")
 
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 	requireNoPath(t, filepath.Join(repo, "zsh"))
@@ -658,8 +658,8 @@ func TestAddRejectsRepositorySidePackageSourceConflictWithoutMutation(t *testing
 	requireNoError(t, err)
 
 	_, err = NewService(repo, env).Add(target, "zsh")
-	requireErrorContains(t, err, "repo-side package source")
-	requireErrorContains(t, err, "already exists")
+	requireErrorContains(t, err, "already has tracked content")
+	requireErrorContains(t, err, "choose another source path")
 
 	requireFileContent(t, target, "local config\n")
 	requireFileContent(t, existingSource, "existing package source\n")
@@ -1580,7 +1580,7 @@ links = [
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
 
 	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"zsh"}})
-	requireErrorContains(t, err, "source \".missing\" is missing")
+	requireErrorContains(t, err, "zsh/.missing is missing from the repository")
 	requireNoPath(t, filepath.Join(home, ".zshrc"))
 }
 
@@ -1598,7 +1598,7 @@ links = [
 	writeTextFile(t, target, "local copy\n")
 
 	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"zsh"}, Force: true})
-	requireErrorContains(t, err, "source \".missing\" is missing")
+	requireErrorContains(t, err, "zsh/.missing is missing from the repository")
 	requireFileContent(t, target, "local copy\n")
 	requireNoDottyBackups(t, home)
 }
@@ -1731,7 +1731,7 @@ packages = ["tmux-macos", "tmux-linux"]
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := svc.Link(tt.options)
-			requireErrorContains(t, err, "competing selected mappings")
+			requireErrorContains(t, err, "selected packages compete")
 		})
 	}
 }
@@ -1761,7 +1761,7 @@ links = [
 	assertSymlink(t, target, macosSource)
 
 	_, err = svc.Link(LinkOptions{Packages: []string{"tmux-linux"}})
-	requireErrorContains(t, err, "blocked by package \"tmux-macos\"")
+	requireErrorContains(t, err, "linked by tmux-macos")
 	assertSymlink(t, target, macosSource)
 
 	_, err = svc.Link(LinkOptions{Packages: []string{"tmux-linux"}, Force: true})
@@ -2529,7 +2529,7 @@ func TestLeaveCopyUnlinkCopiesSourceAndFailsWhenSourceIsMissing(t *testing.T) {
 	requireNoError(t, os.Remove(source))
 	requireNoError(t, os.Symlink(source, target))
 	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}, LeaveCopy: true})
-	requireErrorContains(t, err, "source \".zshrc\" is missing")
+	requireErrorContains(t, err, "zsh/.zshrc is missing from the repository")
 	assertSymlink(t, target, source)
 }
 

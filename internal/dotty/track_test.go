@@ -128,7 +128,7 @@ links = [
 				Selector: mustParseSelector(t, "zsh/.missing"),
 				Targets:  []string{"~/.missing"},
 			},
-			wantErr: "source",
+			wantErr: "is missing from the repository",
 		},
 		{
 			name: "missing package root",
@@ -152,7 +152,7 @@ links = [
 				Selector: mustParseSelector(t, "zsh/.zprofile"),
 				Targets:  []string{"~/.zshrc"},
 			},
-			wantErr: "already maps target",
+			wantErr: "is already mapped",
 		},
 	}
 

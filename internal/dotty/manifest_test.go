@@ -184,7 +184,7 @@ func TestValidateManifestRejectsInvalidManifestShape(t *testing.T) {
 					{Source: ".zprofile", Target: absTarget},
 				}},
 			}},
-			wantErr: "mapped more than once",
+			wantErr: "is already mapped",
 		},
 		{
 			name: "invalid collection name",
@@ -250,8 +250,8 @@ func TestValidateManifestDuplicateTargetErrorIncludesActionableHint(t *testing.T
 	}}
 
 	err := ValidateManifest(manifest, env)
-	requireErrorContains(t, err, "mapped more than once")
-	requireErrorContains(t, err, "edit dotty.toml")
+	requireErrorContains(t, err, "is already mapped")
+	requireErrorContains(t, err, "dotty untrack")
 }
 
 func TestAddManifestLinkCreatesDedupesAndRejectsTargetReuse(t *testing.T) {
@@ -269,12 +269,12 @@ func TestAddManifestLinkCreatesDedupesAndRejectsTargetReuse(t *testing.T) {
 	requireErrorContains(
 		t,
 		AddManifestLink(manifest, "zsh", LinkMapping{Source: ".zshenv", Target: "~/.zshrc"}, env),
-		"already maps target",
+		"is already mapped",
 	)
 	requireErrorContains(
 		t,
 		AddManifestLink(manifest, "zsh", LinkMapping{Source: ".zshenv", Target: "~/.zshrc"}, env),
-		"edit dotty.toml",
+		"dotty untrack",
 	)
 }
 

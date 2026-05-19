@@ -8,6 +8,7 @@ import (
 type SelectedLinkMapping struct {
 	Package string
 	Link    LinkMapping
+	Added   bool
 }
 
 func ResolvePackageSelection(

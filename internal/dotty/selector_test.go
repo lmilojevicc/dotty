@@ -30,7 +30,7 @@ func TestParseSelector(t *testing.T) {
 		{
 			name:    "empty source selector",
 			arg:     "nvim/",
-			wantErr: "empty source selector",
+			wantErr: "source selector in \"nvim/\" is empty",
 		},
 		{
 			name:    "empty selector",
