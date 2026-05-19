@@ -582,7 +582,7 @@ func TestCommandSurfaceInventory(t *testing.T) {
 		},
 		{
 			name:  "list",
-			use:   "list",
+			use:   "list [<package>]",
 			short: "List packages and collections defined in the manifest",
 		},
 		{
@@ -735,7 +735,7 @@ func TestHelpVersionAndCompletionAreRepositoryIndependent(t *testing.T) {
 			name: "list help",
 			args: []string{"list", "--help"},
 			want: []string{
-				"Usage:\n  dotty list [flags]\n",
+				"Usage:\n  dotty list [<package>] [flags]\n",
 				"Global options:\n      --repo string",
 			},
 		},
@@ -1208,7 +1208,7 @@ func TestCommandHelpUsesOptionsAndGlobalOptions(t *testing.T) {
 
 	for _, want := range []string{
 		"List packages and collections defined in the manifest\n\n",
-		"Usage:\n  dotty list [flags]\n",
+		"Usage:\n  dotty list [<package>] [flags]\n",
 		"Options:\n",
 		"Global options:\n",
 	} {
@@ -2001,6 +2001,46 @@ packages = ["tmux", "zsh"]
 	requireOutputContains(t, out, "tmux, zsh")
 }
 
+func TestListPackagePrintsDetailedSourcesAndTargets(t *testing.T) {
+	_, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+  { source = "sesh-fzf", target = "~/.local/bin/sesh-fzf" },
+]
+`)
+
+	out, errOut, err := executeCommand("--repo", repo, "list", "scripts")
+	if err != nil {
+		t.Fatalf("list scripts failed: %v\nstderr: %s", err, errOut)
+	}
+
+	want := "Package scripts\n" +
+		"  docx2pdf -> ~/.local/bin/docx2pdf\n" +
+		"  sesh-fzf -> ~/.local/bin/sesh-fzf\n"
+	if out != want {
+		t.Fatalf("unexpected detailed list output\nwant:\n%s\ngot:\n%s", want, out)
+	}
+}
+
+func TestListRejectsPackageSourceSelector(t *testing.T) {
+	_, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+]
+`)
+
+	_, _, err := executeCommand("--repo", repo, "list", "scripts/docx2pdf")
+	if err == nil || !strings.Contains(err.Error(), "list accepts packages only") {
+		t.Fatalf("expected package-only list error, got %v", err)
+	}
+}
+
 func TestListPrintsEmptyInventory(t *testing.T) {
 	_, repo := setupCLITest(t)
 	writeManifest(t, repo, "version = 1\n")
@@ -2736,7 +2776,11 @@ func TestCommandArgumentDiagnosticsCoverInvalidShapes(t *testing.T) {
 			args: []string{"unlink"},
 			want: "usage: dotty unlink <package>... | --all | --collection <collection>",
 		},
-		{name: "list too many args", args: []string{"list", "extra"}, want: "usage: dotty list"},
+		{
+			name: "list too many args",
+			args: []string{"list", "extra", "again"},
+			want: "usage: dotty list [<package>]",
+		},
 		{name: "repo too many args", args: []string{"repo", "extra"}, want: "usage: dotty repo"},
 		{
 			name: "completion missing shell",
@@ -3069,7 +3113,11 @@ func TestCommandArgumentErrorsIncludeSampleUsage(t *testing.T) {
 			args: []string{"unlink"},
 			want: "usage: dotty unlink <package>... | --all | --collection <collection>",
 		},
-		{name: "list too many args", args: []string{"list", "extra"}, want: "usage: dotty list"},
+		{
+			name: "list too many args",
+			args: []string{"list", "extra", "again"},
+			want: "usage: dotty list [<package>]",
+		},
 	}
 
 	for _, tt := range tests {

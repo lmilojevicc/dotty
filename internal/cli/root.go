@@ -432,16 +432,16 @@ func (a *app) statusCommand() *cobra.Command {
 
 func (a *app) listCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:               "list",
+		Use:               "list [<package>]",
 		Short:             "List packages and collections defined in the manifest",
-		Args:              noArgs,
-		ValidArgsFunction: cobra.NoFileCompletions,
+		Args:              maximumArgs(1),
+		ValidArgsFunction: a.completePackages,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
 				return err
 			}
-			inventory, err := svc.List()
+			inventory, err := svc.List(args...)
 			if err != nil {
 				return err
 			}

@@ -344,6 +344,10 @@ func renderPadded(out io.Writer, text string, style lipgloss.Style, width int) {
 }
 
 func renderInventory(out io.Writer, inventory *dotty.Inventory) {
+	if inventory.Detail != nil {
+		renderInventoryPackageDetail(out, inventory.Detail)
+		return
+	}
 	fmt.Fprintln(out, packageStyle.Render("Packages"))
 	if len(inventory.Packages) == 0 {
 		fmt.Fprintf(out, "  %s\n", mutedStyle.Render("none"))
@@ -373,6 +377,22 @@ func renderInventory(out io.Writer, inventory *dotty.Inventory) {
 			"  %-24s %s\n",
 			packageStyle.Render(collection.Name),
 			strings.Join(collection.Packages, ", "),
+		)
+	}
+}
+
+func renderInventoryPackageDetail(out io.Writer, pkg *dotty.InventoryPackage) {
+	fmt.Fprintf(out, "%s %s\n", packageStyle.Render("Package"), packageStyle.Render(pkg.Name))
+	if len(pkg.Links) == 0 {
+		fmt.Fprintf(out, "  %s\n", mutedStyle.Render("no links"))
+		return
+	}
+	for _, link := range pkg.Links {
+		fmt.Fprintf(
+			out,
+			"  %s -> %s\n",
+			sourceStyle.Render(link.Source),
+			pathStyle.Render(link.Target),
 		)
 	}
 }
