@@ -576,7 +576,7 @@ func TestCommandSurfaceInventory(t *testing.T) {
 		{
 			name:  "status",
 			use:   "status [<selector>...]",
-			short: "Show linked, unlinked, conflict, missing-source, empty, partial, and untracked states",
+			short: "Show linked, unlinked, conflict, blocked, missing-source, empty, partial, and untracked states",
 			flags: []string{"state:", "verbose:v"},
 		},
 		{

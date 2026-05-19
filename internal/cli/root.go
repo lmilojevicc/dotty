@@ -321,7 +321,7 @@ func (a *app) statusCommand() *cobra.Command {
 	var stateFilters []string
 	cmd := &cobra.Command{
 		Use:               "status [<selector>...]",
-		Short:             "Show linked, unlinked, conflict, missing-source, empty, partial, and untracked states",
+		Short:             "Show linked, unlinked, conflict, blocked, missing-source, empty, partial, and untracked states",
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: a.completeManifestAndRepoSelectors,
 		RunE: func(cmd *cobra.Command, args []string) error {

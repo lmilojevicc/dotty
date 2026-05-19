@@ -242,12 +242,11 @@ _Avoid_: transaction, all-or-nothing filesystem write
 - **Unlink** on an absent target is a no-op and does not error.
 - **Leave Copy Unlink** on an absent target copies the **Package Source** to the **Target Path** and reports that no link existed.
 - **Untrack** leaves an **Empty Package** in the **Manifest** when it removes the last **Link Mapping** from a **Package**.
-- **Untrack** can remove all selected **Link Mappings** for a **Package Selector**, **Package Source Selector**, **Collection**, or explicit **Target Paths**.
+- **Untrack** can remove all selected **Link Mappings** for one **Package Selector** or **Package Source Selector**, optionally narrowed by explicit **Target Paths**.
 - **Unlink** does not delete target-side files or directories that are not the expected Dotty **Links**.
-- **Add** selects exactly one target-side **Target Path** and either one **Package Selector** or one **Package Source Selector**.
-- Adding with a **Package Selector** uses Dotty's default source placement rules.
-- Adding with a **Package Source Selector** uses the selector's package-relative source path as the new **Package Source**, including for directories.
-- Adding a directory with a **Package Selector** always uses the **Package Root** as the **Package Source**.
+- **Add** selects exactly one target-side **Target Path** and one package name; it does not accept **Package Source Selectors**.
+- Adding uses Dotty's default source placement rules.
+- Adding a directory as a new **Package** always uses the **Package Root** as the **Package Source**.
 - Adding a file as a new **Package** creates a **Package Source** whose default **Source Name** is the basename of the **Target Path**.
 - Adding a file to an existing **Package** creates a new **Package Source** whose default **Source Name** is the basename of the **Target Path**.
 - **Symlink Adoption** keeps the symlink path as the **Target Path** and brings the resolved content under the **Dotfiles Repository**.
