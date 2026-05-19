@@ -15,6 +15,7 @@ func TestStatusStateFilter(t *testing.T) {
 			"unlinked",
 			"partial",
 			"conflict",
+			"blocked",
 			"missing-source",
 			"empty",
 			"untracked",
@@ -29,6 +30,7 @@ func TestStatusStateFilter(t *testing.T) {
 			"unlinked":       StateUnlinked,
 			"partial":        StatePartial,
 			"conflict":       StateConflict,
+			"blocked":        StateBlocked,
 			"missing-source": StateMissingSource,
 			"empty":          StateEmpty,
 			"untracked":      StateUntracked,
@@ -45,7 +47,7 @@ func TestStatusStateFilter(t *testing.T) {
 		requireErrorContains(
 			t,
 			err,
-			`unsupported status state "invalid" (supported values: linked, unlinked, partial, conflict, missing-source, empty, untracked)`,
+			`unsupported status state "invalid" (supported values: linked, unlinked, partial, conflict, blocked, missing-source, empty, untracked)`,
 		)
 	})
 

@@ -3,6 +3,7 @@ package dotty
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 type LinkOptions struct {
@@ -103,7 +104,7 @@ func (s Service) planLinkWithManifest(manifest *Manifest, options LinkOptions) (
 
 	plan := &linkPlan{}
 	for _, mapping := range selected {
-		action, err := s.classifyLinkAction(mapping.Package, mapping.Link, options.Force)
+		action, err := s.classifyLinkAction(manifest, mapping.Package, mapping.Link, options.Force)
 		if err != nil {
 			return nil, err
 		}
@@ -197,6 +198,7 @@ func rejectCompetingSelectedLinkMappings(selected []SelectedLinkMapping, env Env
 }
 
 func (s Service) classifyLinkAction(
+	manifest *Manifest,
 	packageName string,
 	mapping LinkMapping,
 	force bool,
@@ -261,7 +263,18 @@ func (s Service) classifyLinkAction(
 				action.state = linkTargetRelativeCorrect
 			}
 		} else {
+			blocker, blocked, err := s.blockingPackageForTarget(manifest, packageName, targetAbs)
+			if err != nil {
+				return action, err
+			}
 			if !force {
+				if blocked {
+					return action, fmt.Errorf(
+						"target %s is blocked by package %q (use --force to switch alternatives)",
+						targetAbs,
+						blocker,
+					)
+				}
 				targetText, _ := os.Readlink(targetAbs)
 				return action, fmt.Errorf(
 					"target %s is a symlink to another source %s (use --force to replace it)",
@@ -281,6 +294,36 @@ func (s Service) classifyLinkAction(
 		action.state = linkTargetNonSymlink
 	}
 	return action, nil
+}
+
+func (s Service) blockingPackageForTarget(
+	manifest *Manifest,
+	packageName string,
+	targetAbs string,
+) (string, bool, error) {
+	targetKey := filepath.Clean(targetAbs)
+	for otherPackageName, pkg := range manifest.Packages {
+		if otherPackageName == packageName {
+			continue
+		}
+		for _, link := range pkg.Links {
+			otherTargetAbs, err := ExpandTargetPath(link.Target, s.Env)
+			if err != nil {
+				return "", false, err
+			}
+			if filepath.Clean(otherTargetAbs) != targetKey {
+				continue
+			}
+			otherSourceAbs, err := PackageSourcePath(s.Repo, otherPackageName, link.Source)
+			if err != nil {
+				return "", false, err
+			}
+			if symlinkPointsTo(targetAbs, otherSourceAbs) {
+				return otherPackageName, true, nil
+			}
+		}
+	}
+	return "", false, nil
 }
 
 func (s Service) executeLinkAction(tx *Tx, action *linkAction) error {

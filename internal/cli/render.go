@@ -15,6 +15,7 @@ var stateStyles = map[dotty.State]lipgloss.Style{
 	dotty.StateUnlinked:      lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Bold(true),
 	dotty.StatePartial:       lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true),
 	dotty.StateConflict:      lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true),
+	dotty.StateBlocked:       lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true),
 	dotty.StateMissingSource: lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Bold(true),
 	dotty.StateEmpty:         lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Bold(true),
 	dotty.StateUntracked:     lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true),

@@ -1099,6 +1099,7 @@ links = [
 			"unlinked",
 			"partial",
 			"conflict",
+			"blocked",
 			"missing-source",
 			"empty",
 			"untracked",
@@ -1127,7 +1128,15 @@ links = [
 	requireChoices(
 		t,
 		choices,
-		[]string{"unlinked", "partial", "conflict", "missing-source", "empty", "untracked"},
+		[]string{
+			"unlinked",
+			"partial",
+			"conflict",
+			"blocked",
+			"missing-source",
+			"empty",
+			"untracked",
+		},
 	)
 	if directive != cobra.ShellCompDirectiveNoFileComp {
 		t.Fatalf(
@@ -2902,7 +2911,7 @@ packages = ["zsh"]
 			{
 				name: "invalid status state",
 				args: []string{"--repo", repo, "status", "--state", "nope"},
-				want: "error: unsupported status state \"nope\" (supported values: linked, unlinked, partial, conflict, missing-source, empty, untracked)\n",
+				want: "error: unsupported status state \"nope\" (supported values: linked, unlinked, partial, conflict, blocked, missing-source, empty, untracked)\n",
 			},
 			{
 				name: "target conflict",

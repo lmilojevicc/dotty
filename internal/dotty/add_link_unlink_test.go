@@ -1736,6 +1736,48 @@ packages = ["tmux-macos", "tmux-linux"]
 	}
 }
 
+func TestLinkAlternativeBlockedByManagedSourceRequiresForceAndReportsBlocked(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.tmux-macos]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[packages.tmux-linux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
+	macosSource := filepath.Join(repo, "tmux-macos")
+	linuxSource := filepath.Join(repo, "tmux-linux")
+	requireNoError(t, os.MkdirAll(macosSource, 0o755))
+	requireNoError(t, os.MkdirAll(linuxSource, 0o755))
+	target := filepath.Join(home, ".config", "tmux")
+	svc := NewService(repo, env)
+
+	_, err := svc.Link(LinkOptions{Packages: []string{"tmux-macos"}})
+	requireNoError(t, err)
+	assertSymlink(t, target, macosSource)
+
+	_, err = svc.Link(LinkOptions{Packages: []string{"tmux-linux"}})
+	requireErrorContains(t, err, "blocked by package \"tmux-macos\"")
+	assertSymlink(t, target, macosSource)
+
+	_, err = svc.Link(LinkOptions{Packages: []string{"tmux-linux"}, Force: true})
+	requireNoError(t, err)
+	assertSymlink(t, target, linuxSource)
+
+	report, err := svc.Status([]string{"tmux-macos", "tmux-linux"})
+	requireNoError(t, err)
+	if report.Packages[0].Name != "tmux-macos" || report.Packages[0].State != StateBlocked {
+		t.Fatalf("expected tmux-macos to be BLOCKED, got %#v", report.Packages[0])
+	}
+	if report.Packages[1].Name != "tmux-linux" || report.Packages[1].State != StateLinked {
+		t.Fatalf("expected tmux-linux to be LINKED, got %#v", report.Packages[1])
+	}
+}
+
 func TestLinkTrackCreatesMappingAndLinksSelectedSource(t *testing.T) {
 	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")

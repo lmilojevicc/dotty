@@ -14,6 +14,7 @@ const (
 	StateLinked        State = "LINKED"
 	StateUnlinked      State = "UNLINKED"
 	StateConflict      State = "CONFLICT"
+	StateBlocked       State = "BLOCKED"
 	StateMissingSource State = "MISSING SOURCE"
 	StateEmpty         State = "EMPTY"
 	StateUntracked     State = "UNTRACKED"
@@ -28,6 +29,7 @@ var statusFilterValues = []struct {
 	{value: "unlinked", state: StateUnlinked},
 	{value: "partial", state: StatePartial},
 	{value: "conflict", state: StateConflict},
+	{value: "blocked", state: StateBlocked},
 	{value: "missing-source", state: StateMissingSource},
 	{value: "empty", state: StateEmpty},
 	{value: "untracked", state: StateUntracked},
@@ -114,7 +116,7 @@ func (s Service) Status(packageFilter []string) (*StatusReport, error) {
 		pkg := manifest.Packages[packageName]
 		status := PackageStatus{Name: packageName}
 		for _, mapping := range pkg.Links {
-			entry := s.entryStatus(packageName, mapping)
+			entry := s.entryStatus(manifest, packageName, mapping)
 			status.Entries = append(status.Entries, entry)
 		}
 		status.State = summarizePackage(status.Entries)
@@ -181,7 +183,11 @@ func cloneUntrackedItems(items []UntrackedItem) []UntrackedItem {
 	return append([]UntrackedItem(nil), items...)
 }
 
-func (s Service) entryStatus(packageName string, mapping LinkMapping) EntryStatus {
+func (s Service) entryStatus(
+	manifest *Manifest,
+	packageName string,
+	mapping LinkMapping,
+) EntryStatus {
 	entry := EntryStatus{Package: packageName, Source: mapping.Source, Target: mapping.Target}
 	sourceAbs, err := PackageSourcePath(s.Repo, packageName, mapping.Source)
 	if err != nil {
@@ -228,6 +234,8 @@ func (s Service) entryStatus(packageName string, mapping LinkMapping) EntryStatu
 	}
 	if symlinkPointsTo(targetAbs, sourceAbs) {
 		entry.State = StateLinked
+	} else if _, ok, err := s.blockingPackageForTarget(manifest, packageName, targetAbs); err == nil && ok {
+		entry.State = StateBlocked
 	} else {
 		entry.State = StateConflict
 	}
@@ -247,6 +255,9 @@ func summarizePackage(entries []EntryStatus) State {
 	}
 	if counts[StateConflict] > 0 {
 		return StateConflict
+	}
+	if counts[StateBlocked] > 0 {
+		return StateBlocked
 	}
 	if counts[StateLinked] == len(entries) {
 		return StateLinked
