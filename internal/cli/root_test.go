@@ -1467,13 +1467,13 @@ links = [
 ]
 `)
 
-	for _, command := range []string{"link", "unlink", "status"} {
+	for _, command := range []string{"link", "unlink"} {
 		t.Run(command, func(t *testing.T) {
 			choices, directive, errOut, err := executeCompletionResult("--repo", repo, command, "")
 			if err != nil {
 				t.Fatalf("%s completion failed: %v\nstderr: %s", command, err, errOut)
 			}
-			requireChoices(t, choices, []string{"tmux", "zsh", "zsh/.zshrc"})
+			requireChoices(t, choices, []string{"tmux", "zsh"})
 			if directive != cobra.ShellCompDirectiveNoFileComp {
 				t.Fatalf(
 					"%s directive mismatch: want %d, got %d",
@@ -1497,6 +1497,32 @@ links = [
 				)
 			}
 		})
+	}
+
+	choices, directive, errOut, err := executeCompletionResult("--repo", repo, "status", "")
+	if err != nil {
+		t.Fatalf("status completion failed: %v\nstderr: %s", err, errOut)
+	}
+	requireChoices(t, choices, []string{"tmux", "zsh", "zsh/.zshrc"})
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf(
+			"status directive mismatch: want %d, got %d",
+			cobra.ShellCompDirectiveNoFileComp,
+			directive,
+		)
+	}
+
+	choices, directive, errOut, err = executeCompletionResult("--repo", repo, "status", "t")
+	if err != nil {
+		t.Fatalf("status prefix completion failed: %v\nstderr: %s", err, errOut)
+	}
+	requireChoices(t, choices, []string{"tmux"})
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf(
+			"status prefix directive mismatch: want %d, got %d",
+			cobra.ShellCompDirectiveNoFileComp,
+			directive,
+		)
 	}
 }
 
@@ -1786,7 +1812,7 @@ links = [
 	writeTextFile(t, filepath.Join(repo, "scripts", "office", "helper"), "helper\n")
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zprofile"), "export PATH\n")
 
-	want := []string{
+	allSelectors := []string{
 		"scripts",
 		"scripts/docx2pdf",
 		"scripts/office",
@@ -1797,13 +1823,13 @@ links = [
 		"zsh/.zprofile",
 		"zsh/.zshrc",
 	}
-	for _, command := range []string{"link", "unlink", "status"} {
-		t.Run(command, func(t *testing.T) {
+	for _, command := range []string{"link", "unlink"} {
+		t.Run(command+" empty prefix", func(t *testing.T) {
 			choices, directive, errOut, err := executeCompletionResult("--repo", repo, command, "")
 			if err != nil {
 				t.Fatalf("%s selector completion failed: %v\nstderr: %s", command, err, errOut)
 			}
-			requireChoices(t, choices, want)
+			requireChoices(t, choices, []string{"scripts", "zsh"})
 			if directive != cobra.ShellCompDirectiveNoFileComp {
 				t.Fatalf(
 					"%s selector directive mismatch: want %d, got %d",
@@ -1813,6 +1839,48 @@ links = [
 				)
 			}
 		})
+
+		t.Run(command+" package prefix", func(t *testing.T) {
+			choices, directive, errOut, err := executeCompletionResult(
+				"--repo", repo, command, "scripts/",
+			)
+			if err != nil {
+				t.Fatalf(
+					"%s package-source completion failed: %v\nstderr: %s",
+					command,
+					err,
+					errOut,
+				)
+			}
+			requireChoices(t, choices, []string{
+				"scripts/docx2pdf",
+				"scripts/office",
+				"scripts/office/docx2pdf",
+				"scripts/office/helper",
+				"scripts/unused",
+			})
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Fatalf(
+					"%s package-source directive mismatch: want %d, got %d",
+					command,
+					cobra.ShellCompDirectiveNoFileComp,
+					directive,
+				)
+			}
+		})
+	}
+
+	choices, directive, errOut, err := executeCompletionResult("--repo", repo, "status", "")
+	if err != nil {
+		t.Fatalf("status selector completion failed: %v\nstderr: %s", err, errOut)
+	}
+	requireChoices(t, choices, allSelectors)
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf(
+			"status selector directive mismatch: want %d, got %d",
+			cobra.ShellCompDirectiveNoFileComp,
+			directive,
+		)
 	}
 }
 
@@ -1829,14 +1897,27 @@ func TestTrackCompletesRepoPackageSourcesAndFilesystemTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("track selector completion failed: %v\nstderr: %s", err, errOut)
 	}
-	requireChoices(
-		t,
-		choices,
-		[]string{"scripts", "scripts/docx2pdf", "scripts/nested", "scripts/nested/ocli"},
-	)
+	requireChoices(t, choices, []string{"scripts"})
 	if directive != cobra.ShellCompDirectiveNoFileComp {
 		t.Fatalf(
 			"unexpected track selector directive: want %d, got %d",
+			cobra.ShellCompDirectiveNoFileComp,
+			directive,
+		)
+	}
+
+	choices, directive, errOut, err = executeCompletionResult("--repo", repo, "track", "scripts/")
+	if err != nil {
+		t.Fatalf("track package-source completion failed: %v\nstderr: %s", err, errOut)
+	}
+	requireChoices(
+		t,
+		choices,
+		[]string{"scripts/docx2pdf", "scripts/nested", "scripts/nested/ocli"},
+	)
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf(
+			"unexpected track package-source directive: want %d, got %d",
 			cobra.ShellCompDirectiveNoFileComp,
 			directive,
 		)

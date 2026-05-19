@@ -113,7 +113,13 @@ func (a *app) completeLinkArgs(
 ) ([]string, cobra.ShellCompDirective) {
 	track, _ := cmd.Flags().GetBool("track")
 	if track {
+		if len(args) == 0 && toComplete == "" {
+			return a.completeRepoPackages(toComplete)
+		}
 		return a.completeRepoSelectors(args, toComplete)
+	}
+	if len(args) == 0 && toComplete == "" {
+		return a.completeManifestAndRepoPackages(cmd, toComplete)
 	}
 	return a.completeManifestAndRepoSelectors(cmd, args, toComplete)
 }
@@ -127,6 +133,9 @@ func (a *app) completeUnlinkArgs(
 	if untrack {
 		return a.completeManifestSelectors(args, toComplete)
 	}
+	if len(args) == 0 && toComplete == "" {
+		return a.completeManifestAndRepoPackages(cmd, toComplete)
+	}
 	return a.completeManifestAndRepoSelectors(cmd, args, toComplete)
 }
 
@@ -136,6 +145,9 @@ func (a *app) completeTrackArgs(
 	toComplete string,
 ) ([]string, cobra.ShellCompDirective) {
 	if len(args) == 0 {
+		if toComplete == "" {
+			return a.completeRepoPackages(toComplete)
+		}
 		return a.completeRepoSelectors(args, toComplete)
 	}
 	return nil, cobra.ShellCompDirectiveDefault
@@ -207,6 +219,46 @@ func (a *app) completeManifestAndRepoSelectors(
 	return completeStrings(
 		choices,
 		selectedCompletions(args),
+		toComplete,
+	), cobra.ShellCompDirectiveNoFileComp
+}
+
+func (a *app) completeManifestAndRepoPackages(
+	cmd *cobra.Command,
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	if all, err := cmd.Flags().GetBool("all"); err == nil && all {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	manifest, repo, _, err := a.completionManifest()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	allowedPackages := map[string]bool{}
+	for packageName := range manifest.Packages {
+		allowedPackages[packageName] = true
+	}
+	choices := mergeCompletionValues(
+		manifestPackageValues(manifest),
+		repoPackageValues(repo, allowedPackages),
+	)
+	return completeStrings(
+		choices,
+		nil,
+		toComplete,
+	), cobra.ShellCompDirectiveNoFileComp
+}
+
+func (a *app) completeRepoPackages(
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	_, repo, _, err := a.completionManifest()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return completeStrings(
+		repoPackageValues(repo, nil),
+		nil,
 		toComplete,
 	), cobra.ShellCompDirectiveNoFileComp
 }
@@ -441,6 +493,35 @@ func manifestSelectorValues(manifest *dotty.Manifest) []string {
 			}
 			appendCompletionValue(&values, seen, packageName+"/"+link.Source)
 		}
+	}
+	slices.Sort(values)
+	return values
+}
+
+func manifestPackageValues(manifest *dotty.Manifest) []string {
+	return sortedKeys(manifest.Packages)
+}
+
+func repoPackageValues(repo string, allowedPackages map[string]bool) []string {
+	entries, err := filepath.Glob(filepath.Join(repo, "*"))
+	if err != nil {
+		return nil
+	}
+	values := []string{}
+	seen := map[string]bool{}
+	for _, packageRoot := range entries {
+		stat, err := os.Stat(packageRoot)
+		if err != nil || !stat.IsDir() {
+			continue
+		}
+		packageName := filepath.Base(packageRoot)
+		if _, err := dotty.ParseSelector(packageName); err != nil {
+			continue
+		}
+		if allowedPackages != nil && !allowedPackages[packageName] {
+			continue
+		}
+		appendCompletionValue(&values, seen, packageName)
 	}
 	slices.Sort(values)
 	return values
