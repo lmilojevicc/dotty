@@ -277,6 +277,7 @@ func (a *app) linkCommand() *cobra.Command {
 	var targets []string
 	var all bool
 	var force bool
+	var track bool
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:               "link <package>... | --all | --collection <collection>",
@@ -288,16 +289,26 @@ func (a *app) linkCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			linked, err := svc.Link(
-				dotty.LinkOptions{
-					Packages:    args,
-					Collections: collections,
-					Targets:     targets,
-					All:         all,
-					Force:       force,
-					DryRun:      dryRun,
-				},
-			)
+			options := dotty.LinkOptions{
+				Collections: collections,
+				Targets:     targets,
+				All:         all,
+				Force:       force,
+				Track:       track,
+				DryRun:      dryRun,
+			}
+			if track {
+				for _, arg := range args {
+					selector, err := dotty.ParseSelector(arg)
+					if err != nil {
+						return err
+					}
+					options.Selectors = append(options.Selectors, selector)
+				}
+			} else {
+				options.Packages = args
+			}
+			linked, err := svc.Link(options)
 			if err != nil {
 				return err
 			}
@@ -310,6 +321,8 @@ func (a *app) linkCommand() *cobra.Command {
 		StringArrayVarP(&collections, "collection", "c", nil, "collection to link (can be repeated)")
 	mustRegisterFlagCompletion(cmd, "collection", a.completeCollections)
 	cmd.Flags().BoolVar(&force, "force", false, "destructively replace target conflicts")
+	cmd.Flags().
+		BoolVar(&track, "track", false, "add missing Link Mappings before linking explicit targets")
 	cmd.Flags().StringArrayVar(&targets, "target", nil, "Target Path to link (can be repeated)")
 	mustRegisterFlagCompletion(cmd, "target", a.completeTargets)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")

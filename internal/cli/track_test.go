@@ -29,6 +29,33 @@ func requireFileContent(t *testing.T, path, want string) {
 	}
 }
 
+func TestLinkTrackCommandAddsMappingAndCreatesLink(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, "version = 1\n")
+	source := filepath.Join(repo, "scripts", "docx2pdf")
+	writeTextFile(t, source, "#!/bin/sh\n")
+
+	out, errOut, err := executeCommand(
+		"--repo", repo,
+		"link", "scripts/docx2pdf", "--target", "~/.local/bin/docx2pdf", "--track",
+	)
+	if err != nil {
+		t.Fatalf("link --track failed: %v\nstderr: %s", err, errOut)
+	}
+
+	if out != "linked scripts: ~/.local/bin/docx2pdf -> ~/dotfiles/scripts/docx2pdf\n" {
+		t.Fatalf("unexpected link --track output: %q", out)
+	}
+	assertSymlink(t, filepath.Join(home, ".local", "bin", "docx2pdf"), source)
+	requireFileContent(t, dotty.ManifestPath(repo), `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+]
+`)
+}
+
 func TestTrackCommandAddsMappingsAndPrintsResults(t *testing.T) {
 	home, repo := setupCLITest(t)
 	writeManifest(t, repo, "version = 1\n")

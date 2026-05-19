@@ -1682,6 +1682,188 @@ links = [
 	assertSymlink(t, filepath.Join(home, ".zshrc"), filepath.Join(repo, "zsh", ".zshrc"))
 }
 
+func TestLinkTrackCreatesMappingAndLinksSelectedSource(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, "version = 1\n")
+	writeTextFile(t, filepath.Join(repo, "scripts", "docx2pdf"), "#!/bin/sh\n")
+
+	results, err := NewService(repo, env).Link(LinkOptions{
+		Selectors: []Selector{mustParseSelector(t, "scripts/docx2pdf")},
+		Targets:   []string{"~/.local/bin/docx2pdf"},
+		Track:     true,
+	})
+
+	requireNoError(t, err)
+	if len(results) != 1 || results[0].Package != "scripts" ||
+		results[0].Target != "~/.local/bin/docx2pdf" {
+		t.Fatalf("unexpected link --track results: %#v", results)
+	}
+	assertSymlink(
+		t,
+		filepath.Join(home, ".local", "bin", "docx2pdf"),
+		filepath.Join(repo, "scripts", "docx2pdf"),
+	)
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+]
+`)
+}
+
+func TestLinkTrackPackageSelectorCreatesRootMappingAndLink(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, "version = 1\n")
+	writeTextFile(t, filepath.Join(repo, "tmux", "tmux.conf"), "set -g mouse on\n")
+
+	_, err := NewService(repo, env).Link(LinkOptions{
+		Selectors: []Selector{mustParseSelector(t, "tmux")},
+		Targets:   []string{"~/.config/tmux"},
+		Track:     true,
+	})
+
+	requireNoError(t, err)
+	assertSymlink(t, filepath.Join(home, ".config", "tmux"), filepath.Join(repo, "tmux"))
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
+}
+
+func TestLinkTrackRejectsInvalidSelectionCombinations(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, "version = 1\n")
+	writeTextFile(t, filepath.Join(repo, "scripts", "docx2pdf"), "#!/bin/sh\n")
+
+	tests := []struct {
+		name    string
+		options LinkOptions
+		wantErr string
+	}{
+		{
+			name: "without target",
+			options: LinkOptions{
+				Selectors: []Selector{mustParseSelector(t, "scripts/docx2pdf")},
+				Track:     true,
+			},
+			wantErr: "--track requires --target",
+		},
+		{
+			name: "multiple selectors",
+			options: LinkOptions{
+				Selectors: []Selector{
+					mustParseSelector(t, "scripts/docx2pdf"),
+					mustParseSelector(t, "scripts/other"),
+				},
+				Targets: []string{"~/.local/bin/docx2pdf"},
+				Track:   true,
+			},
+			wantErr: "--track accepts exactly one selector",
+		},
+		{
+			name: "all",
+			options: LinkOptions{
+				All:     true,
+				Targets: []string{"~/.local/bin/docx2pdf"},
+				Track:   true,
+			},
+			wantErr: "--track cannot be combined with --all",
+		},
+		{
+			name: "collection",
+			options: LinkOptions{
+				Collections: []string{"tools"},
+				Targets:     []string{"~/.local/bin/docx2pdf"},
+				Track:       true,
+			},
+			wantErr: "--track cannot be combined with --collection",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewService(repo, env).Link(tt.options)
+			requireErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestLinkTrackIsAtomicAndForceCanReplaceConflicts(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	manifest := "version = 1\n"
+	writeDottyManifest(t, repo, manifest)
+	writeTextFile(t, filepath.Join(repo, "scripts", "docx2pdf"), "#!/bin/sh\n")
+	target := filepath.Join(home, ".local", "bin", "docx2pdf")
+	writeTextFile(t, target, "local conflict\n")
+
+	_, err := NewService(repo, env).Link(LinkOptions{
+		Selectors: []Selector{mustParseSelector(t, "scripts/docx2pdf")},
+		Targets:   []string{"~/.local/bin/docx2pdf"},
+		Track:     true,
+	})
+	requireErrorContains(t, err, "already exists")
+	requireFileContent(t, ManifestPath(repo), manifest)
+	requireFileContent(t, target, "local conflict\n")
+
+	_, err = NewService(repo, env).Link(LinkOptions{
+		Selectors: []Selector{mustParseSelector(t, "scripts/docx2pdf")},
+		Targets:   []string{"~/.local/bin/docx2pdf"},
+		Track:     true,
+		Force:     true,
+	})
+	requireNoError(t, err)
+	assertSymlink(t, target, filepath.Join(repo, "scripts", "docx2pdf"))
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+]
+`)
+}
+
+func TestLinkTrackOnlyLinksExplicitTargetsNotExistingMappings(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "old", target = "~/.local/bin/old" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "scripts", "old"), "old\n")
+	writeTextFile(t, filepath.Join(repo, "scripts", "new"), "new\n")
+
+	_, err := NewService(repo, env).Link(LinkOptions{
+		Selectors: []Selector{mustParseSelector(t, "scripts/new")},
+		Targets:   []string{"~/.local/bin/new"},
+		Track:     true,
+	})
+
+	requireNoError(t, err)
+	requireNoPath(t, filepath.Join(home, ".local", "bin", "old"))
+	assertSymlink(
+		t,
+		filepath.Join(home, ".local", "bin", "new"),
+		filepath.Join(repo, "scripts", "new"),
+	)
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.scripts]
+links = [
+  { source = "old", target = "~/.local/bin/old" },
+  { source = "new", target = "~/.local/bin/new" },
+]
+`)
+}
+
 func TestLinkTargetsOnlySelectedLinkMappings(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 

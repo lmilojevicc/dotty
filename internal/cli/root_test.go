@@ -559,7 +559,7 @@ func TestCommandSurfaceInventory(t *testing.T) {
 			name:  "link",
 			use:   "link <package>... | --all | --collection <collection>",
 			short: "Create links for packages, all packages, or an explicit collection",
-			flags: []string{"all:", "collection:c", "dry-run:", "force:", "target:"},
+			flags: []string{"all:", "collection:c", "dry-run:", "force:", "target:", "track:"},
 		},
 		{
 			name:  "unlink",

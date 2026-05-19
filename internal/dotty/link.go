@@ -7,10 +7,12 @@ import (
 
 type LinkOptions struct {
 	Packages    []string
+	Selectors   []Selector
 	Collections []string
 	Targets     []string
 	All         bool
 	Force       bool
+	Track       bool
 	DryRun      bool
 }
 
@@ -51,12 +53,20 @@ func (s Service) Link(options LinkOptions) ([]LinkResult, error) {
 		return s.linkResults(plan, true), nil
 	}
 	if err := withRepositoryLock(s.Repo, func() error {
-		var err error
-		plan, err = s.planLink(options)
-		if err != nil {
-			return err
-		}
 		return RunAtomic(func(tx *Tx) error {
+			manifest, err := LoadManifest(s.Repo, s.Env)
+			if err != nil {
+				return err
+			}
+			plan, err = s.planLinkWithManifest(manifest, options)
+			if err != nil {
+				return err
+			}
+			if options.Track {
+				if err := SaveManifest(tx, s.Repo, manifest, s.Env); err != nil {
+					return err
+				}
+			}
 			for i := range plan.actions {
 				if err := s.executeLinkAction(tx, &plan.actions[i]); err != nil {
 					return err
@@ -79,14 +89,11 @@ func (s Service) planLink(options LinkOptions) (*linkPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	selected, err := ResolveSelectedLinkMappings(
-		manifest,
-		options.Packages,
-		options.Collections,
-		options.All,
-		options.Targets,
-		s.Env,
-	)
+	return s.planLinkWithManifest(manifest, options)
+}
+
+func (s Service) planLinkWithManifest(manifest *Manifest, options LinkOptions) (*linkPlan, error) {
+	selected, err := s.resolveLinkSelections(manifest, options)
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +107,70 @@ func (s Service) planLink(options LinkOptions) (*linkPlan, error) {
 		plan.actions = append(plan.actions, action)
 	}
 	return plan, nil
+}
+
+func (s Service) resolveLinkSelections(
+	manifest *Manifest,
+	options LinkOptions,
+) ([]SelectedLinkMapping, error) {
+	if options.Track {
+		return s.resolveTrackedLinkSelections(manifest, options)
+	}
+	if len(options.Selectors) > 0 {
+		return ResolveSelectors(manifest, ResolveOptions{
+			Selectors: options.Selectors,
+			Targets:   options.Targets,
+		}, s.Env)
+	}
+	return ResolveSelectedLinkMappings(
+		manifest,
+		options.Packages,
+		options.Collections,
+		options.All,
+		options.Targets,
+		s.Env,
+	)
+}
+
+func (s Service) resolveTrackedLinkSelections(
+	manifest *Manifest,
+	options LinkOptions,
+) ([]SelectedLinkMapping, error) {
+	if len(options.Targets) == 0 {
+		return nil, fmt.Errorf("--track requires --target")
+	}
+	if options.All {
+		return nil, fmt.Errorf("--track cannot be combined with --all")
+	}
+	if len(options.Collections) > 0 {
+		return nil, fmt.Errorf("--track cannot be combined with --collection")
+	}
+	selectors := append([]Selector{}, options.Selectors...)
+	for _, packageName := range options.Packages {
+		selectors = append(selectors, Selector{Package: packageName})
+	}
+	if len(selectors) != 1 {
+		return nil, fmt.Errorf("--track accepts exactly one selector")
+	}
+	tracked, err := s.planTrack(manifest, TrackOptions{
+		Selector: selectors[0],
+		Targets:  options.Targets,
+		DryRun:   options.DryRun,
+	})
+	if err != nil {
+		return nil, err
+	}
+	selected := make([]SelectedLinkMapping, 0, len(tracked))
+	for _, item := range tracked {
+		selected = append(selected, SelectedLinkMapping{
+			Package: item.Package,
+			Link: LinkMapping{
+				Source: item.Source,
+				Target: item.Target,
+			},
+		})
+	}
+	return selected, nil
 }
 
 func (s Service) classifyLinkAction(
