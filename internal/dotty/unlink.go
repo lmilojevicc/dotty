@@ -90,6 +90,9 @@ func (s Service) unlinkResults(plan *unlinkPlan, dryRun bool) []UnlinkResult {
 
 func unlinkResultAction(state unlinkTargetState, leaveCopy bool) string {
 	if state == unlinkTargetAbsent {
+		if leaveCopy {
+			return UnlinkResultActionCopySource
+		}
 		return UnlinkResultActionNoop
 	}
 	if leaveCopy {
@@ -158,30 +161,6 @@ func (s Service) classifyUnlinkAction(
 	if err := validateTargetParentsAreLexicalDirectories(targetAbs, s.Env); err != nil {
 		return action, err
 	}
-	info, err := os.Lstat(targetAbs)
-	if err != nil {
-		if os.IsNotExist(err) {
-			action.state = unlinkTargetAbsent
-			return action, nil
-		}
-		return action, fmt.Errorf("inspect target %s: %w", targetAbs, err)
-	}
-
-	if info.Mode()&os.ModeSymlink == 0 {
-		return action, fmt.Errorf(
-			"target %s is not an expected dotty link (inspect with `dotty status` or remove it manually)",
-			targetAbs,
-		)
-	}
-	if !symlinkPointsTo(targetAbs, sourceAbs) {
-		targetText, _ := os.Readlink(targetAbs)
-		return action, fmt.Errorf(
-			"target %s is a symlink to another source %s (restore the expected Link or remove it manually)",
-			targetAbs,
-			targetText,
-		)
-	}
-	action.state = unlinkTargetCorrect
 
 	// For --leave-copy unlink, validate that the source copy can be materialized during planning.
 	if leaveCopy {
@@ -229,6 +208,31 @@ func (s Service) classifyUnlinkAction(
 		}
 	}
 
+	info, err := os.Lstat(targetAbs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			action.state = unlinkTargetAbsent
+			return action, nil
+		}
+		return action, fmt.Errorf("inspect target %s: %w", targetAbs, err)
+	}
+
+	if info.Mode()&os.ModeSymlink == 0 {
+		return action, fmt.Errorf(
+			"target %s is not an expected dotty link (inspect with `dotty status` or remove it manually)",
+			targetAbs,
+		)
+	}
+	if !symlinkPointsTo(targetAbs, sourceAbs) {
+		targetText, _ := os.Readlink(targetAbs)
+		return action, fmt.Errorf(
+			"target %s is a symlink to another source %s (restore the expected Link or remove it manually)",
+			targetAbs,
+			targetText,
+		)
+	}
+	action.state = unlinkTargetCorrect
+
 	return action, nil
 }
 
@@ -249,6 +253,9 @@ func unlinkCopySourcePath(sourceAbs string) (string, error) {
 
 func (s Service) executeUnlinkAction(tx *Tx, action *unlinkAction) error {
 	if action.state == unlinkTargetAbsent {
+		if action.leaveCopy {
+			return CopyPathTx(tx, action.copySourceAbs, action.targetAbs)
+		}
 		return nil
 	}
 

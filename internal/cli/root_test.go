@@ -392,7 +392,7 @@ links = [
 		t.Fatalf("unlink --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
 	want := "would copy Package Source config: ~/.linked (leave-copy)\n" +
-		"already absent config: ~/.absent (no-op)\n"
+		"would copy Package Source config: ~/.absent (leave-copy)\n"
 	if out != want {
 		t.Fatalf("unexpected soft unlink dry-run output\nwant: %q\ngot:  %q", want, out)
 	}

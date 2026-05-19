@@ -1774,9 +1774,11 @@ func TestUnlinkHandlesAbsentTargetsAndDefaultUnlinkWithoutSource(t *testing.T) {
 
 	results, err := svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
 	requireNoError(t, err)
-	if len(results) != 1 || results[0].Target != "~/.zshrc" {
+	if len(results) != 1 || results[0].Target != "~/.zshrc" ||
+		results[0].Action != UnlinkResultActionNoop {
 		t.Fatalf("unexpected unlink results: %#v", results)
 	}
+	requireNoPath(t, filepath.Join(home, ".zshrc"))
 
 	target := filepath.Join(home, ".zshrc")
 	expectedSource := filepath.Join(repo, "zsh", ".zshrc")
@@ -1784,6 +1786,25 @@ func TestUnlinkHandlesAbsentTargetsAndDefaultUnlinkWithoutSource(t *testing.T) {
 	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
 	requireNoError(t, err)
 	requireNoPath(t, target)
+}
+
+func TestLeaveCopyUnlinkCopiesSourceWhenTargetIsAbsent(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	writeTextFile(t, source, "export EDITOR=vim\n")
+	target := filepath.Join(home, ".zshrc")
+
+	results, err := NewService(repo, env).Unlink(UnlinkOptions{
+		Packages:  []string{"zsh"},
+		LeaveCopy: true,
+	})
+
+	requireNoError(t, err)
+	if len(results) != 1 || results[0].Action != UnlinkResultActionCopySource ||
+		!results[0].LeaveCopy {
+		t.Fatalf("unexpected leave-copy unlink results: %#v", results)
+	}
+	requireFileContent(t, target, "export EDITOR=vim\n")
 }
 
 func TestUnlinkDryRunLeavesLeaveCopyAndDefaultTargetsUnchanged(t *testing.T) {
@@ -1836,7 +1857,7 @@ links = [
 		leaveCopyResults,
 	), []string{
 		"copy-source",
-		"noop",
+		"copy-source",
 	}; strings.Join(
 		got,
 		"\n",
@@ -2011,6 +2032,7 @@ func TestUnlinkRefusesConflictsAndWrongSymlinks(t *testing.T) {
 	writeTextFile(t, target, "local copy\n")
 	_, err := svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
 	requireErrorContains(t, err, "not an expected dotty link")
+	requireErrorContains(t, err, "dotty status")
 	requireFileContent(t, target, "local copy\n")
 
 	requireNoError(t, os.Remove(target))
