@@ -41,8 +41,6 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 	cmd.AddCommand(app.versionCommand())
 	cmd.AddCommand(app.initCommand())
 	cmd.AddCommand(app.addCommand())
-	cmd.AddCommand(app.mapCommand())
-	cmd.AddCommand(app.unmapCommand())
 	cmd.AddCommand(app.trackCommand())
 	cmd.AddCommand(app.untrackCommand())
 	cmd.AddCommand(app.linkCommand())
@@ -138,66 +136,6 @@ func (a *app) addCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
-	return cmd
-}
-
-func (a *app) mapCommand() *cobra.Command {
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:               "map <package> <source> <target>",
-		Short:             "Add a Manifest Link Mapping without changing files",
-		Args:              exactArgs(3),
-		ValidArgsFunction: a.completeMapArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			svc, err := a.service()
-			if err != nil {
-				return err
-			}
-			result, err := svc.Map(
-				dotty.MapOptions{
-					Package: args[0],
-					Source:  args[1],
-					Target:  args[2],
-					DryRun:  dryRun,
-				},
-			)
-			if err != nil {
-				return err
-			}
-			renderMapResult(a.out, result)
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
-	return cmd
-}
-
-func (a *app) unmapCommand() *cobra.Command {
-	var targets []string
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:               "unmap <package> --target <target>",
-		Short:             "Remove Manifest Link Mappings without changing files",
-		Args:              unmapArgs(&targets),
-		ValidArgsFunction: a.completePackages,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			svc, err := a.service()
-			if err != nil {
-				return err
-			}
-			results, err := svc.Unmap(
-				dotty.UnmapOptions{Package: args[0], Targets: targets, DryRun: dryRun},
-			)
-			if err != nil {
-				return err
-			}
-			renderUnmapResults(a.out, results)
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
-	cmd.Flags().StringArrayVar(&targets, "target", nil, "Target Path to unmap (can be repeated)")
-	mustRegisterFlagCompletion(cmd, "target", a.completeTargets)
 	return cmd
 }
 
@@ -508,15 +446,6 @@ func noArgs(cmd *cobra.Command, args []string) error {
 func selectionArgs(collections *[]string, all *bool) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 && len(*collections) == 0 && !*all {
-			return usageError(cmd)
-		}
-		return nil
-	}
-}
-
-func unmapArgs(targets *[]string) cobra.PositionalArgs {
-	return func(cmd *cobra.Command, args []string) error {
-		if len(args) != 1 || len(*targets) == 0 {
 			return usageError(cmd)
 		}
 		return nil

@@ -114,21 +114,6 @@ func unlinkDryRunVerbAndNote(action string, leaveCopy bool) (string, string) {
 	}
 }
 
-func renderMapResult(out io.Writer, result *dotty.MapResult) {
-	verb := "mapped"
-	if result.DryRun {
-		verb = "would map"
-	}
-	fmt.Fprintf(
-		out,
-		"%s %s: %s -> %s\n",
-		successStyle.Render(verb),
-		packageStyle.Render(result.Package),
-		pathStyle.Render(result.Target),
-		pathStyle.Render(result.SourcePath),
-	)
-}
-
 func renderTrackResults(out io.Writer, results []dotty.TrackResult) {
 	for _, result := range results {
 		verb := "tracked"
@@ -164,23 +149,6 @@ func renderUntrackResults(out io.Writer, results []dotty.UntrackResult) {
 			pathStyle.Render(result.Target),
 			sourceStyle.Render(result.Source),
 			mutedStyle.Render(note),
-		)
-	}
-}
-
-func renderUnmapResults(out io.Writer, results []dotty.UnmapResult) {
-	for _, result := range results {
-		verb := "unmapped"
-		if result.DryRun {
-			verb = "would unmap"
-		}
-		fmt.Fprintf(
-			out,
-			"%s %s: %s -> %s\n",
-			successStyle.Render(verb),
-			packageStyle.Render(result.Package),
-			pathStyle.Render(result.Target),
-			sourceStyle.Render(result.Source),
 		)
 	}
 }

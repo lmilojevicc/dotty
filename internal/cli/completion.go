@@ -97,23 +97,6 @@ func (a *app) completeAddArgs(
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
-func (a *app) completeMapArgs(
-	cmd *cobra.Command,
-	args []string,
-	toComplete string,
-) ([]string, cobra.ShellCompDirective) {
-	if len(args) == 0 {
-		return a.completePackages(cmd, args, toComplete)
-	}
-	if len(args) == 1 {
-		return a.completePackageSources(args[0], toComplete)
-	}
-	if len(args) == 2 {
-		return nil, cobra.ShellCompDirectiveDefault
-	}
-	return nil, cobra.ShellCompDirectiveNoFileComp
-}
-
 func completeDirectories(
 	cmd *cobra.Command,
 	args []string,
@@ -201,14 +184,6 @@ func (a *app) completionTargetsForScope(
 	packages := args
 	collections, _ := cmd.Flags().GetStringArray("collection")
 	all, _ := cmd.Flags().GetBool("all")
-	if cmd.Name() == "unmap" {
-		collections = nil
-		all = false
-		if len(args) > 1 {
-			packages = args[:1]
-		}
-	}
-
 	if len(packages) > 0 || len(collections) > 0 || all {
 		selected, err := dotty.ResolveSelectedLinkMappings(
 			manifest,

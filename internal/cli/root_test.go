@@ -555,18 +555,6 @@ func TestCommandSurfaceInventory(t *testing.T) {
 			flags: []string{"dry-run:"},
 		},
 		{
-			name:  "map",
-			use:   "map <package> <source> <target>",
-			short: "Add a Manifest Link Mapping without changing files",
-			flags: []string{"dry-run:"},
-		},
-		{
-			name:  "unmap",
-			use:   "unmap <package> --target <target>",
-			short: "Remove Manifest Link Mappings without changing files",
-			flags: []string{"dry-run:", "target:"},
-		},
-		{
 			name:  "link",
 			use:   "link <package>... | --all | --collection <collection>",
 			short: "Create links for packages, all packages, or an explicit collection",
@@ -656,7 +644,6 @@ func TestHelpVersionAndCompletionAreRepositoryIndependent(t *testing.T) {
 				"Usage:\n  dotty [command]\n",
 				"init",
 				"add",
-				"unmap",
 				"link",
 				"unlink",
 				"status",
@@ -682,27 +669,6 @@ func TestHelpVersionAndCompletionAreRepositoryIndependent(t *testing.T) {
 			want: []string{
 				"Usage:\n  dotty add <path> <package> [flags]\n",
 				"Options:\n      --dry-run",
-				"Global options:\n      --repo string",
-			},
-		},
-		{
-			name: "map help",
-			args: []string{"map", "--help"},
-			want: []string{
-				"Usage:\n  dotty map <package> <source> <target> [flags]\n",
-				"Add a Manifest Link Mapping without changing files",
-				"Options:\n      --dry-run",
-				"Global options:\n      --repo string",
-			},
-		},
-		{
-			name: "unmap help",
-			args: []string{"unmap", "--help"},
-			want: []string{
-				"Usage:\n  dotty unmap <package> --target <target> [flags]\n",
-				"Remove Manifest Link Mappings without changing files",
-				"Options:\n      --dry-run",
-				"      --target stringArray",
 				"Global options:\n      --repo string",
 			},
 		},
@@ -1501,7 +1467,7 @@ links = [
 ]
 `)
 
-	for _, command := range []string{"map", "unmap", "link", "unlink", "status"} {
+	for _, command := range []string{"link", "unlink", "status", "list"} {
 		t.Run(command, func(t *testing.T) {
 			choices, directive, errOut, err := executeCompletionResult("--repo", repo, command, "")
 			if err != nil {
@@ -1571,11 +1537,6 @@ func TestManifestBackedCompletionsFailClosed(t *testing.T) {
 			name: "missing manifest collection",
 			repo: missingManifestRepo,
 			args: []string{"unlink", "--collection", ""},
-		},
-		{
-			name: "missing manifest unmap target",
-			repo: missingManifestRepo,
-			args: []string{"unmap", "tmux", "--target", ""},
 		},
 		{
 			name: "invalid manifest package",
@@ -1803,65 +1764,6 @@ links = []
 	}
 }
 
-func TestMapCompletesPackageSourcesAndTargetPathUsesFileCompletion(t *testing.T) {
-	_, repo := setupCLITest(t)
-	writeManifest(t, repo, `version = 1
-
-[packages.scripts]
-links = []
-`)
-	if err := os.MkdirAll(filepath.Join(repo, "scripts", "nested"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(repo, "scripts", "docx2pdf"),
-		[]byte("docx2pdf\n"),
-		0o644,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(repo, "scripts", "nested", "ocli"),
-		[]byte("ocli\n"),
-		0o644,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	choices, directive, errOut, err := executeCompletionResult("--repo", repo, "map", "scripts", "")
-	if err != nil {
-		t.Fatalf("map source completion failed: %v\nstderr: %s", err, errOut)
-	}
-	requireChoices(t, choices, []string{"docx2pdf", "nested", "nested/ocli"})
-	if directive != cobra.ShellCompDirectiveNoFileComp {
-		t.Fatalf(
-			"unexpected map source directive: want %d, got %d",
-			cobra.ShellCompDirectiveNoFileComp,
-			directive,
-		)
-	}
-
-	choices, directive, errOut, err = executeCompletionResult(
-		"--repo",
-		repo,
-		"map",
-		"scripts",
-		"docx2pdf",
-		"",
-	)
-	if err != nil {
-		t.Fatalf("map target completion failed: %v\nstderr: %s", err, errOut)
-	}
-	requireChoices(t, choices, nil)
-	if directive != cobra.ShellCompDirectiveDefault {
-		t.Fatalf(
-			"unexpected map target directive: want %d, got %d",
-			cobra.ShellCompDirectiveDefault,
-			directive,
-		)
-	}
-}
-
 func TestTargetFlagCompletesManifestTargets(t *testing.T) {
 	_, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
@@ -1892,11 +1794,6 @@ links = [
 			name: "unlink prefix",
 			args: []string{"unlink", "scripts", "--target", "~/.local/bin/s"},
 			want: []string{"~/.local/bin/sesh-fzf"},
-		},
-		{
-			name: "unmap package scoped",
-			args: []string{"unmap", "scripts", "--target", ""},
-			want: []string{"~/.local/bin/docx2pdf", "~/.local/bin/sesh-fzf"},
 		},
 		{
 			name: "repeated target omitted",
@@ -2524,196 +2421,6 @@ links = [
 	}
 }
 
-func TestMapPrintsAddedMappingAndOnlyWritesManifest(t *testing.T) {
-	home, repo := setupCLITest(t)
-	if err := os.MkdirAll(filepath.Join(repo, "zsh"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(repo, "zsh", ".zshrc"),
-		[]byte("export EDITOR=vim\n"),
-		0o644,
-	); err != nil {
-		t.Fatal(err)
-	}
-	writeManifest(t, repo, `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-]
-`)
-	target := filepath.Join(home, ".config", "shell", "zshrc")
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(target, []byte("local copy remains\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	out, errOut, err := executeCommand("--repo", repo, "map", "zsh", ".zshrc", target)
-	if err != nil {
-		t.Fatalf("map failed: %v\nstderr: %s", err, errOut)
-	}
-
-	want := "mapped zsh: ~/.config/shell/zshrc -> ~/dotfiles/zsh/.zshrc\n"
-	if out != want {
-		t.Fatalf("unexpected map output\nwant: %q\ngot:  %q", want, out)
-	}
-	if data, err := os.ReadFile(target); err != nil || string(data) != "local copy remains\n" {
-		t.Fatalf("target changed: data=%q err=%v", string(data), err)
-	}
-	if data, err := os.ReadFile(
-		dotty.ManifestPath(repo),
-	); err != nil ||
-		string(data) != `version = 1
-
-[packages.zsh]
-links = [
-  { source = ".zshrc", target = "~/.zshrc" },
-  { source = ".zshrc", target = "~/.config/shell/zshrc" },
-]
-` {
-		t.Fatalf("manifest mismatch:\n%s\nerr=%v", string(data), err)
-	}
-}
-
-func TestMapDryRunPrintsWouldMapAndDoesNotWriteManifest(t *testing.T) {
-	_, repo := setupCLITest(t)
-	if err := os.MkdirAll(filepath.Join(repo, "tmux"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(repo, "tmux", "tmux.conf"),
-		[]byte("set -g mouse on\n"),
-		0o644,
-	); err != nil {
-		t.Fatal(err)
-	}
-	writeManifest(t, repo, `version = 1
-
-[packages.tmux]
-links = []
-`)
-	manifestBefore, err := os.ReadFile(dotty.ManifestPath(repo))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	out, errOut, err := executeCommand(
-		"--repo",
-		repo,
-		"map",
-		"--dry-run",
-		"tmux",
-		"tmux.conf",
-		"~/.config/tmux/tmux.conf",
-	)
-	if err != nil {
-		t.Fatalf("map --dry-run failed: %v\nstderr: %s", err, errOut)
-	}
-
-	want := "would map tmux: ~/.config/tmux/tmux.conf -> ~/dotfiles/tmux/tmux.conf\n"
-	if out != want {
-		t.Fatalf("unexpected map dry-run output\nwant: %q\ngot:  %q", want, out)
-	}
-	if data, err := os.ReadFile(dotty.ManifestPath(repo)); err != nil ||
-		string(data) != string(manifestBefore) {
-		t.Fatalf("manifest changed: data=%q err=%v", string(data), err)
-	}
-}
-
-func TestUnmapPrintsRemovedMappingAndOnlyWritesManifest(t *testing.T) {
-	home, repo := setupCLITest(t)
-	writeManifest(t, repo, `version = 1
-
-[packages.scripts]
-links = [
-  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
-  { source = "sesh-fzf", target = "~/.local/bin/sesh-fzf" },
-]
-`)
-	source := filepath.Join(repo, "scripts", "sesh-fzf")
-	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(source, []byte("sesh-fzf\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	target := filepath.Join(home, ".local", "bin", "sesh-fzf")
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(source, target); err != nil {
-		t.Fatal(err)
-	}
-
-	out, errOut, err := executeCommand(
-		"--repo",
-		repo,
-		"unmap",
-		"scripts",
-		"--target",
-		"~/.local/bin/sesh-fzf",
-	)
-	if err != nil {
-		t.Fatalf("unmap failed: %v\nstderr: %s", err, errOut)
-	}
-
-	want := "unmapped scripts: ~/.local/bin/sesh-fzf -> sesh-fzf\n"
-	if out != want {
-		t.Fatalf("unexpected unmap output\nwant: %q\ngot:  %q", want, out)
-	}
-	assertSymlink(t, target, source)
-	data, err := os.ReadFile(dotty.ManifestPath(repo))
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantManifest := `version = 1
-
-[packages.scripts]
-links = [
-  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
-]
-`
-	if string(data) != wantManifest {
-		t.Fatalf("manifest mismatch\nwant:\n%s\ngot:\n%s", wantManifest, string(data))
-	}
-}
-
-func TestUnmapDryRunPrintsWouldUnmapAndDoesNotWriteManifest(t *testing.T) {
-	_, repo := setupCLITest(t)
-	manifest := `version = 1
-
-[packages.scripts]
-links = [
-  { source = "sesh-fzf", target = "~/.local/bin/sesh-fzf" },
-]
-`
-	writeManifest(t, repo, manifest)
-
-	out, errOut, err := executeCommand(
-		"--repo",
-		repo,
-		"unmap",
-		"--dry-run",
-		"scripts",
-		"--target",
-		"~/.local/bin/sesh-fzf",
-	)
-	if err != nil {
-		t.Fatalf("unmap --dry-run failed: %v\nstderr: %s", err, errOut)
-	}
-	want := "would unmap scripts: ~/.local/bin/sesh-fzf -> sesh-fzf\n"
-	if out != want {
-		t.Fatalf("unexpected unmap dry-run output\nwant: %q\ngot:  %q", want, out)
-	}
-	data, err := os.ReadFile(dotty.ManifestPath(repo))
-	if err != nil || string(data) != manifest {
-		t.Fatalf("manifest changed: data=%q err=%v", string(data), err)
-	}
-}
-
 func TestCommandReturnsCoreErrors(t *testing.T) {
 	_, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
@@ -2744,11 +2451,6 @@ packages = ["zsh"]
 	if err == nil || !strings.Contains(err.Error(), "--all cannot be combined") {
 		t.Fatalf("expected --all collection conflict error, got %v", err)
 	}
-
-	_, _, err = executeCommand("--repo", repo, "unmap", "zsh")
-	if err == nil || !strings.Contains(err.Error(), "usage: dotty unmap") {
-		t.Fatalf("expected unmap missing target usage error, got %v", err)
-	}
 }
 
 func TestCommandArgumentDiagnosticsCoverInvalidShapes(t *testing.T) {
@@ -2766,16 +2468,6 @@ func TestCommandArgumentDiagnosticsCoverInvalidShapes(t *testing.T) {
 			name: "add missing args",
 			args: []string{"add"},
 			want: "usage: dotty add <path> <package>",
-		},
-		{
-			name: "map missing args",
-			args: []string{"map", "zsh"},
-			want: "usage: dotty map <package> <source> <target>",
-		},
-		{
-			name: "unmap missing args",
-			args: []string{"unmap"},
-			want: "usage: dotty unmap <package> --target <target>",
 		},
 		{
 			name: "link missing selector",
@@ -3108,11 +2800,6 @@ func TestCommandArgumentErrorsIncludeSampleUsage(t *testing.T) {
 			name: "init too many args",
 			args: []string{"init", "one", "two"},
 			want: "usage: dotty init [<path>]",
-		},
-		{
-			name: "unmap missing args",
-			args: []string{"unmap"},
-			want: "usage: dotty unmap <package> --target <target>",
 		},
 		{
 			name: "link missing selector",
