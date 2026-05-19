@@ -76,6 +76,16 @@ func ValidateManifest(manifest *Manifest, env Env) error {
 					link.Source,
 				)
 			}
+			for existingTarget, existingSource := range targets {
+				if targetPathsOverlap(existingTarget, key) {
+					return fmt.Errorf(
+						"package %q target %q overlaps target mapped by source %q (edit dotty.toml so Link Mapping Target Paths in one package do not contain each other)",
+						name,
+						link.Target,
+						existingSource,
+					)
+				}
+			}
 			targets[key] = link.Source
 		}
 	}
@@ -174,6 +184,18 @@ func sortedKeys[T any](m map[string]T) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func targetPathsOverlap(a, b string) bool {
+	return targetPathContains(a, b) || targetPathContains(b, a)
+}
+
+func targetPathContains(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func validateName(kind, name string) error {

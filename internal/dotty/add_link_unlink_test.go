@@ -1636,25 +1636,22 @@ func TestLinkForceRollsBackEarlierReplacementWhenLaterMappingFailsDuringExecutio
 
 [packages.zsh]
 links = [
-  { source = "config-file", target = "~/.config" },
-  { source = ".zshrc", target = "~/.config/zsh/.zshrc" },
+  { source = ".zshrc", target = "~/.zshrc" },
+  { source = "tool", target = "~/.local/bin/tool" },
 ]
 `)
-	writeTextFile(t, filepath.Join(repo, "zsh", "config-file"), "not a directory\n")
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")
-	targetDir := filepath.Join(home, ".config")
-	writeTextFile(t, filepath.Join(targetDir, "keep"), "preserve me\n")
+	writeTextFile(t, filepath.Join(repo, "zsh", "tool"), "#!/bin/sh\n")
+	earlierTarget := filepath.Join(home, ".zshrc")
+	writeTextFile(t, earlierTarget, "local copy\n")
+	blockedParent := filepath.Join(home, ".local")
+	writeTextFile(t, blockedParent, "not a directory\n")
 
 	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"zsh"}, Force: true})
 	requireErrorContains(t, err, "not a directory")
 
-	info, statErr := os.Lstat(targetDir)
-	requireNoError(t, statErr)
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		t.Fatalf("%s should have rolled back to a real directory, info=%v", targetDir, info)
-	}
-	requireFileContent(t, filepath.Join(targetDir, "keep"), "preserve me\n")
-	requireNoPath(t, filepath.Join(targetDir, "zsh", ".zshrc"))
+	requireFileContent(t, earlierTarget, "local copy\n")
+	requireFileContent(t, blockedParent, "not a directory\n")
 	requireNoDottyBackups(t, home)
 }
 

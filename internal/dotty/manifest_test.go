@@ -65,6 +65,50 @@ func TestValidateManifestAllowsCrossPackageDuplicateTargets(t *testing.T) {
 	requireNoError(t, ValidateManifest(manifest, env))
 }
 
+func TestValidateManifestRejectsOverlappingTargetsWithinPackage(t *testing.T) {
+	_, env := setupHome(t)
+
+	tests := []struct {
+		name  string
+		links []LinkMapping
+	}{
+		{
+			name: "bin directory contains executable target",
+			links: []LinkMapping{
+				{Source: "bin", Target: "~/.bin"},
+				{Source: "docx2pdf", Target: "~/.bin/docx2pdf"},
+			},
+		},
+		{
+			name: "nvim directory contains init file target",
+			links: []LinkMapping{
+				{Source: "nvim", Target: "~/.config/nvim"},
+				{Source: "init.lua", Target: "~/.config/nvim/init.lua"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := &Manifest{Version: ManifestVersion, Packages: map[string]Package{
+				"tools": {Links: tt.links},
+			}}
+
+			requireErrorContains(t, ValidateManifest(manifest, env), "overlaps")
+		})
+	}
+}
+
+func TestValidateManifestAllowsOverlappingTargetsAcrossPackages(t *testing.T) {
+	_, env := setupHome(t)
+	manifest := &Manifest{Version: ManifestVersion, Packages: map[string]Package{
+		"bin-dir":  {Links: []LinkMapping{{Source: "bin", Target: "~/.bin"}}},
+		"docx2pdf": {Links: []LinkMapping{{Source: "docx2pdf", Target: "~/.bin/docx2pdf"}}},
+	}}
+
+	requireNoError(t, ValidateManifest(manifest, env))
+}
+
 func TestValidateManifestRejectsInvalidManifestShape(t *testing.T) {
 	home, env := setupHome(t)
 	absTarget := filepath.Join(home, ".zshrc")
