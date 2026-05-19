@@ -93,6 +93,9 @@ func (a *app) initCommand() *cobra.Command {
 		Args:              maximumArgs(1),
 		ValidArgsFunction: completeInitArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if a.repoFlag != "" {
+				return fmt.Errorf("--repo cannot be used with init")
+			}
 			path := "."
 			if len(args) == 1 {
 				path = args[0]

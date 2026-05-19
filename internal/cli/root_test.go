@@ -444,6 +444,17 @@ links = [
 	requireSnapshotUnchanged(t, home, homeBefore)
 }
 
+func TestInitRejectsRepoFlag(t *testing.T) {
+	home := setupCLIHomeOnly(t)
+	repoFlag := filepath.Join(home, "override")
+	repoArg := filepath.Join(home, "dotfiles")
+
+	_, _, err := executeCommand("--repo", repoFlag, "init", repoArg)
+	if err == nil || !strings.Contains(err.Error(), "--repo cannot be used with init") {
+		t.Fatalf("expected init --repo rejection, got %v", err)
+	}
+}
+
 func TestInitPrintsRepositoryPathAndStoresDefaultRepository(t *testing.T) {
 	home := setupCLIHomeOnly(t)
 	repo := filepath.Join(home, "dotfiles")
