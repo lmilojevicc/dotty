@@ -76,10 +76,11 @@ type PackageStatus struct {
 }
 
 type EntryStatus struct {
-	Package string
-	Source  string
-	Target  string
-	State   State
+	Package   string
+	Source    string
+	Target    string
+	State     State
+	BlockedBy string
 }
 
 type UntrackedItem struct {
@@ -303,8 +304,9 @@ func (s Service) entryStatus(
 	}
 	if symlinkPointsTo(targetAbs, sourceAbs) {
 		entry.State = StateLinked
-	} else if _, ok, err := s.blockingPackageForTarget(manifest, packageName, targetAbs); err == nil && ok {
+	} else if blocker, ok, err := s.blockingPackageForTarget(manifest, packageName, targetAbs); err == nil && ok {
 		entry.State = StateBlocked
+		entry.BlockedBy = blocker
 	} else {
 		entry.State = StateConflict
 	}

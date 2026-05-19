@@ -122,6 +122,65 @@ func TestStatusStateFilter(t *testing.T) {
 	})
 }
 
+func TestStatusReportsBlockedTargetWithOwner(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.tmux-macos]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[packages.tmux-linux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
+	macosSource := filepath.Join(repo, "tmux-macos")
+	linuxSource := filepath.Join(repo, "tmux-linux")
+	requireNoError(t, os.MkdirAll(macosSource, 0o755))
+	requireNoError(t, os.MkdirAll(linuxSource, 0o755))
+	target := filepath.Join(home, ".config", "tmux")
+	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+	requireNoError(t, os.Symlink(linuxSource, target))
+
+	report, err := NewService(repo, env).Status([]string{"tmux-macos", "tmux-linux"})
+	requireNoError(t, err)
+	if report.Packages[0].State != StateBlocked || len(report.Packages[0].Entries) != 1 ||
+		report.Packages[0].Entries[0].BlockedBy != "tmux-linux" {
+		t.Fatalf("expected tmux-macos blocked by tmux-linux, got %#v", report.Packages[0])
+	}
+	if report.Packages[1].State != StateLinked {
+		t.Fatalf("expected tmux-linux linked, got %#v", report.Packages[1])
+	}
+}
+
+func TestStatusReportsCompetingAbsentTargetsAsUnlinked(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.tmux-macos]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[packages.tmux-linux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux-macos"), 0o755))
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux-linux"), 0o755))
+
+	report, err := NewService(repo, env).Status([]string{"tmux-macos", "tmux-linux"})
+	requireNoError(t, err)
+	if report.Packages[0].State != StateUnlinked || report.Packages[1].State != StateUnlinked {
+		t.Fatalf("expected both competing absent targets to be UNLINKED, got %#v", report.Packages)
+	}
+}
+
 func TestStatusSupportsPackageSourceSelectors(t *testing.T) {
 	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")

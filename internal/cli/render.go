@@ -211,11 +211,18 @@ func renderStatus(out io.Writer, report *dotty.StatusReport, verbose bool) {
 func renderVerboseStatus(out io.Writer, report *dotty.StatusReport) {
 	for _, pkg := range report.Packages {
 		if len(pkg.Entries) == 0 {
-			renderVerboseStatusRow(out, pkg.Name, "-", "-", pkg.State)
+			renderVerboseStatusRow(out, pkg.Name, "-", "-", pkg.State, "")
 			continue
 		}
 		for _, entry := range pkg.Entries {
-			renderVerboseStatusRow(out, entry.Package, entry.Source, entry.Target, entry.State)
+			renderVerboseStatusRow(
+				out,
+				entry.Package,
+				entry.Source,
+				entry.Target,
+				entry.State,
+				entry.BlockedBy,
+			)
 		}
 	}
 	if len(report.Untracked) > 0 {
@@ -228,13 +235,20 @@ func renderVerboseStatus(out io.Writer, report *dotty.StatusReport) {
 	}
 }
 
-func renderVerboseStatusRow(out io.Writer, packageName, source, target string, state dotty.State) {
+func renderVerboseStatusRow(
+	out io.Writer,
+	packageName string,
+	source string,
+	target string,
+	state dotty.State,
+	blockedBy string,
+) {
 	renderPadded(out, packageName, packageStyle, verbosePackageColumnWidth)
 	fmt.Fprint(out, " ")
 	renderPadded(out, source, sourceStyle, verboseSourceColumnWidth)
 	fmt.Fprint(out, " ")
 	renderPadded(out, target, pathStyle, verboseTargetColumnWidth)
-	fmt.Fprintf(out, " %s\n", renderState(state))
+	fmt.Fprintf(out, " %s\n", renderStateWithBlockedBy(state, blockedBy))
 }
 
 func renderVerboseUntrackedRow(out io.Writer, item dotty.UntrackedItem) {
@@ -364,8 +378,16 @@ func renderInventory(out io.Writer, inventory *dotty.Inventory) {
 }
 
 func renderState(state dotty.State) string {
-	if style, ok := stateStyles[state]; ok {
-		return style.Render(string(state))
+	return renderStateWithBlockedBy(state, "")
+}
+
+func renderStateWithBlockedBy(state dotty.State, blockedBy string) string {
+	label := string(state)
+	if state == dotty.StateBlocked && blockedBy != "" {
+		label += " by " + blockedBy
 	}
-	return string(state)
+	if style, ok := stateStyles[state]; ok {
+		return style.Render(label)
+	}
+	return label
 }
