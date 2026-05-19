@@ -10,6 +10,13 @@ type Selector struct {
 	Source  string
 }
 
+type ResolveOptions struct {
+	Selectors   []Selector
+	Collections []string
+	Targets     []string
+	All         bool
+}
+
 func ParseSelector(arg string) (Selector, error) {
 	if arg == "" {
 		return Selector{}, fmt.Errorf("empty selector")

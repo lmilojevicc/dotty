@@ -1,6 +1,9 @@
 package dotty
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestParseSelector(t *testing.T) {
 	tests := []struct {
@@ -55,4 +58,109 @@ func TestParseSelector(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveSelectorsExpandsPackageSelector(t *testing.T) {
+	_, env := setupHome(t)
+	manifest := manifestForLinkMappingSelection()
+
+	selected, err := ResolveSelectors(manifest, ResolveOptions{
+		Selectors: []Selector{mustParseSelector(t, "scripts")},
+	}, env)
+
+	requireNoError(t, err)
+	requireSelectedMappings(t, selected, []string{
+		"scripts:~/.local/bin/docx2pdf",
+		"scripts:~/.local/bin/sesh-fzf",
+	})
+}
+
+func TestResolveSelectorsExpandsPackageSourceSelector(t *testing.T) {
+	_, env := setupHome(t)
+	manifest := manifestForLinkMappingSelection()
+
+	selected, err := ResolveSelectors(manifest, ResolveOptions{
+		Selectors: []Selector{mustParseSelector(t, "scripts/docx2pdf")},
+	}, env)
+
+	requireNoError(t, err)
+	requireSelectedMappings(t, selected, []string{"scripts:~/.local/bin/docx2pdf"})
+}
+
+func TestResolveSelectorsCollapsesDuplicateMappings(t *testing.T) {
+	_, env := setupHome(t)
+	manifest := manifestForLinkMappingSelection()
+
+	selected, err := ResolveSelectors(manifest, ResolveOptions{
+		Selectors: []Selector{
+			mustParseSelector(t, "scripts"),
+			mustParseSelector(t, "scripts/docx2pdf"),
+		},
+	}, env)
+
+	requireNoError(t, err)
+	requireSelectedMappings(t, selected, []string{
+		"scripts:~/.local/bin/docx2pdf",
+		"scripts:~/.local/bin/sesh-fzf",
+	})
+}
+
+func TestResolveSelectorsRejectsUnknownPackage(t *testing.T) {
+	_, env := setupHome(t)
+	manifest := manifestForLinkMappingSelection()
+
+	_, err := ResolveSelectors(manifest, ResolveOptions{
+		Selectors: []Selector{mustParseSelector(t, "ghostty")},
+	}, env)
+
+	requireErrorContains(t, err, "unknown package")
+}
+
+func TestResolveSelectorsRejectsUnknownSourceInKnownPackage(t *testing.T) {
+	_, env := setupHome(t)
+	manifest := manifestForLinkMappingSelection()
+
+	_, err := ResolveSelectors(manifest, ResolveOptions{
+		Selectors: []Selector{mustParseSelector(t, "scripts/missing")},
+	}, env)
+
+	requireErrorContains(t, err, "unknown source")
+}
+
+func TestResolveSelectorsTargetsNarrowOneSelector(t *testing.T) {
+	home, env := setupHome(t)
+	manifest := manifestForLinkMappingSelection()
+
+	selected, err := ResolveSelectors(manifest, ResolveOptions{
+		Selectors: []Selector{mustParseSelector(t, "scripts")},
+		Targets: []string{
+			filepath.Join(home, ".local", "bin", "sesh-fzf"),
+			"~/.local/bin/sesh-fzf",
+		},
+	}, env)
+
+	requireNoError(t, err)
+	requireSelectedMappings(t, selected, []string{"scripts:~/.local/bin/sesh-fzf"})
+}
+
+func TestResolveSelectorsRejectsTargetsWithMultipleSelectors(t *testing.T) {
+	_, env := setupHome(t)
+	manifest := manifestForLinkMappingSelection()
+
+	_, err := ResolveSelectors(manifest, ResolveOptions{
+		Selectors: []Selector{
+			mustParseSelector(t, "scripts/docx2pdf"),
+			mustParseSelector(t, "scripts/sesh-fzf"),
+		},
+		Targets: []string{"~/.local/bin/docx2pdf"},
+	}, env)
+
+	requireErrorContains(t, err, "--target cannot be combined with multiple selectors")
+}
+
+func mustParseSelector(t *testing.T, arg string) Selector {
+	t.Helper()
+	selector, err := ParseSelector(arg)
+	requireNoError(t, err)
+	return selector
 }

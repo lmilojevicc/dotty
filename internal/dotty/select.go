@@ -66,6 +66,120 @@ func ResolvePackageSelection(
 	return selected, nil
 }
 
+func ResolveSelectors(
+	manifest *Manifest,
+	options ResolveOptions,
+	env Env,
+) ([]SelectedLinkMapping, error) {
+	if len(options.Targets) > 0 && len(options.Selectors) > 1 {
+		return nil, fmt.Errorf("--target cannot be combined with multiple selectors")
+	}
+	if options.All && (len(options.Selectors) > 0 || len(options.Collections) > 0) {
+		return nil, fmt.Errorf("--all cannot be combined with selectors or collections")
+	}
+
+	selectors := append([]Selector{}, options.Selectors...)
+	if options.All || len(options.Collections) > 0 {
+		selectedPackages, err := ResolvePackageSelection(
+			manifest,
+			nil,
+			options.Collections,
+			options.All,
+		)
+		if err != nil {
+			return nil, err
+		}
+		for _, packageName := range selectedPackages {
+			selectors = append(selectors, Selector{Package: packageName})
+		}
+	}
+	if len(selectors) == 0 {
+		return nil, fmt.Errorf("select at least one selector, collection, or use --all")
+	}
+
+	requestedTargets, err := normalizeTargetSelectors(options.Targets, env)
+	if err != nil {
+		return nil, err
+	}
+	filterTargets := len(requestedTargets) > 0
+
+	seenSelectedMappings := map[string]bool{}
+	matchedTargets := map[string]bool{}
+	selected := []SelectedLinkMapping{}
+	for _, selector := range selectors {
+		if err := validateName("package", selector.Package); err != nil {
+			return nil, err
+		}
+		if selector.IsPackageSource() {
+			if err := validateSourcePath(selector.Source); err != nil {
+				return nil, err
+			}
+		}
+
+		pkg, ok := manifest.Packages[selector.Package]
+		if !ok {
+			return nil, fmt.Errorf(
+				"unknown package %q (run `dotty list` to see packages)",
+				selector.Package,
+			)
+		}
+
+		matchedSource := false
+		for _, link := range pkg.Links {
+			if selector.IsPackageSource() {
+				if link.Source != selector.Source {
+					continue
+				}
+				matchedSource = true
+			}
+
+			if filterTargets {
+				targetKey, err := targetKey(link.Target, env)
+				if err != nil {
+					return nil, err
+				}
+				if _, ok := requestedTargets[targetKey]; !ok {
+					continue
+				}
+				matchedTargets[targetKey] = true
+			}
+
+			mappingKey := selectedMappingKey(selector.Package, link)
+			if seenSelectedMappings[mappingKey] {
+				continue
+			}
+			seenSelectedMappings[mappingKey] = true
+			selected = append(selected, SelectedLinkMapping{Package: selector.Package, Link: link})
+		}
+		if selector.IsPackageSource() && !matchedSource {
+			return nil, fmt.Errorf(
+				"unknown source %q in package %q",
+				selector.Source,
+				selector.Package,
+			)
+		}
+	}
+
+	if filterTargets {
+		for _, target := range options.Targets {
+			key, ok := requestedTargetsByOriginal(requestedTargets, target, env)
+			if !ok || matchedTargets[key] {
+				continue
+			}
+			return nil, fmt.Errorf(
+				"target %q is not mapped in the selected package scope",
+				target,
+			)
+		}
+	}
+
+	return selected, nil
+}
+
+func selectedMappingKey(packageName string, link LinkMapping) string {
+	return packageName + "\x00" + link.Source + "\x00" + link.Target
+}
+
 func ResolveSelectedLinkMappings(
 	manifest *Manifest,
 	packages []string,
