@@ -94,41 +94,110 @@ func (s Service) Status(packageFilter []string) (*StatusReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	selected := sortedKeys(manifest.Packages)
-	if len(packageFilter) > 0 {
-		selected = []string{}
-		for _, name := range packageFilter {
-			if err := validateName("package", name); err != nil {
-				return nil, err
-			}
-			if _, ok := manifest.Packages[name]; !ok {
-				return nil, fmt.Errorf(
-					"unknown package %q (run `dotty list` to see packages)",
-					name,
-				)
-			}
-			selected = append(selected, name)
-		}
+	selected, err := s.statusSelections(manifest, packageFilter)
+	if err != nil {
+		return nil, err
 	}
 
 	report := &StatusReport{RepoPath: HomeRelative(s.Repo, s.Env)}
-	for _, packageName := range selected {
-		pkg := manifest.Packages[packageName]
-		status := PackageStatus{Name: packageName}
+	for _, selection := range selected {
+		pkg := manifest.Packages[selection.Package]
+		status := PackageStatus{Name: selection.Name()}
 		for _, mapping := range pkg.Links {
-			entry := s.entryStatus(manifest, packageName, mapping)
+			if !selection.IncludesSource(mapping.Source) {
+				continue
+			}
+			entry := s.entryStatus(manifest, selection.Package, mapping)
 			status.Entries = append(status.Entries, entry)
 		}
 		status.State = summarizePackage(status.Entries)
 		report.Packages = append(report.Packages, status)
 	}
 
-	untracked, err := s.untrackedContent(manifest, packageFilter)
+	var untrackedSelections []statusSelection
+	if len(packageFilter) > 0 {
+		untrackedSelections = selected
+	}
+	untracked, err := s.untrackedContent(manifest, untrackedSelections)
 	if err != nil {
 		return nil, err
 	}
 	report.Untracked = untracked
 	return report, nil
+}
+
+type statusSelection struct {
+	Package string
+	Source  string
+}
+
+func (s statusSelection) Name() string {
+	if s.Source == "" {
+		return s.Package
+	}
+	return s.Package + "/" + s.Source
+}
+
+func (s statusSelection) IncludesSource(source string) bool {
+	if s.Source == "" {
+		return true
+	}
+	return source == s.Source || strings.HasPrefix(source, s.Source+"/")
+}
+
+func (s Service) statusSelections(
+	manifest *Manifest,
+	packageFilter []string,
+) ([]statusSelection, error) {
+	if len(packageFilter) == 0 {
+		selected := make([]statusSelection, 0, len(manifest.Packages))
+		for _, packageName := range sortedKeys(manifest.Packages) {
+			selected = append(selected, statusSelection{Package: packageName})
+		}
+		return selected, nil
+	}
+
+	selected := make([]statusSelection, 0, len(packageFilter))
+	for _, raw := range packageFilter {
+		selector, err := ParseSelector(raw)
+		if err != nil {
+			return nil, err
+		}
+		pkg, ok := manifest.Packages[selector.Package]
+		if !ok {
+			return nil, fmt.Errorf(
+				"unknown package %q (run `dotty list` to see packages)",
+				selector.Package,
+			)
+		}
+		if selector.IsPackageSource() && !statusSourceExists(s.Repo, selector, pkg) {
+			return nil, fmt.Errorf(
+				"unknown source %q in package %q",
+				selector.Source,
+				selector.Package,
+			)
+		}
+		selected = append(
+			selected,
+			statusSelection{Package: selector.Package, Source: selector.Source},
+		)
+	}
+	return selected, nil
+}
+
+func statusSourceExists(repo string, selector Selector, pkg Package) bool {
+	for _, link := range pkg.Links {
+		if link.Source == selector.Source || strings.HasPrefix(link.Source, selector.Source+"/") {
+			return true
+		}
+	}
+	if exists, err := pathExists(
+		filepath.Join(PackageRoot(repo, selector.Package), filepath.FromSlash(selector.Source)),
+	); err == nil &&
+		exists {
+		return true
+	}
+	return false
 }
 
 func FilterStatusReport(report *StatusReport, selected []State) *StatusReport {
@@ -270,20 +339,23 @@ func summarizePackage(entries []EntryStatus) State {
 
 func (s Service) untrackedContent(
 	manifest *Manifest,
-	packageFilter []string,
+	selections []statusSelection,
 ) ([]UntrackedItem, error) {
-	if len(packageFilter) == 0 {
+	if len(selections) == 0 {
 		return s.untrackedRepositoryContent(manifest)
 	}
 	seen := map[string]bool{}
 	var untracked []UntrackedItem
-	for _, packageName := range packageFilter {
-		pkg := manifest.Packages[packageName]
-		items, err := s.untrackedPackageContent(packageName, pkg)
+	for _, selection := range selections {
+		pkg := manifest.Packages[selection.Package]
+		items, err := s.untrackedPackageContent(selection.Package, pkg)
 		if err != nil {
 			return nil, err
 		}
 		for _, item := range items {
+			if selection.Source != "" && !selection.IncludesSource(item.Source) {
+				continue
+			}
 			if seen[item.Path] {
 				continue
 			}

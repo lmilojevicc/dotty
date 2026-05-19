@@ -122,6 +122,86 @@ func TestStatusStateFilter(t *testing.T) {
 	})
 }
 
+func TestStatusSupportsPackageSourceSelectors(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+  { source = "sesh-fzf", target = "~/.local/bin/sesh-fzf" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "scripts", "docx2pdf"), "docx2pdf\n")
+	writeTextFile(t, filepath.Join(repo, "scripts", "sesh-fzf"), "sesh\n")
+
+	report, err := NewService(repo, env).Status([]string{"scripts/docx2pdf"})
+	requireNoError(t, err)
+	if len(report.Packages) != 1 || report.Packages[0].Name != "scripts/docx2pdf" {
+		t.Fatalf("unexpected package source status: %#v", report.Packages)
+	}
+	if len(report.Packages[0].Entries) != 1 || report.Packages[0].Entries[0].Source != "docx2pdf" {
+		t.Fatalf("expected only docx2pdf entry, got %#v", report.Packages[0].Entries)
+	}
+}
+
+func TestStatusPackageSourceSelectorIncludesUntrackedContentUnderDirectory(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "office/docx2pdf", target = "~/.local/bin/docx2pdf" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "scripts", "office", "docx2pdf"), "docx2pdf\n")
+	writeTextFile(t, filepath.Join(repo, "scripts", "office", "unused"), "unused\n")
+	writeTextFile(t, filepath.Join(repo, "scripts", "other"), "other\n")
+
+	report, err := NewService(repo, env).Status([]string{"scripts/office"})
+	requireNoError(t, err)
+	if len(report.Packages) != 1 || report.Packages[0].Name != "scripts/office" {
+		t.Fatalf("unexpected office status: %#v", report.Packages)
+	}
+	if len(report.Packages[0].Entries) != 1 ||
+		report.Packages[0].Entries[0].Source != "office/docx2pdf" {
+		t.Fatalf("expected office/docx2pdf entry, got %#v", report.Packages[0].Entries)
+	}
+	if len(report.Untracked) != 1 || report.Untracked[0].Path != "scripts/office/unused" {
+		t.Fatalf("expected untracked content under scripts/office, got %#v", report.Untracked)
+	}
+}
+
+func TestStatusSupportsMixedPackageAndPackageSourceSelectors(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+]
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "scripts", "docx2pdf"), "docx2pdf\n")
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux"), 0o755))
+
+	report, err := NewService(repo, env).Status([]string{"scripts/docx2pdf", "tmux"})
+	requireNoError(t, err)
+	if len(report.Packages) != 2 {
+		t.Fatalf("expected two statuses, got %#v", report.Packages)
+	}
+	if report.Packages[0].Name != "scripts/docx2pdf" || report.Packages[1].Name != "tmux" {
+		t.Fatalf("unexpected mixed selector order: %#v", report.Packages)
+	}
+}
+
 func TestStatusReportsEscapingPackageSourceSymlinkAsConflict(t *testing.T) {
 	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")
