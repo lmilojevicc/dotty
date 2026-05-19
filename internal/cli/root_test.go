@@ -310,13 +310,13 @@ links = [
 		t.Fatalf("unlink failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "unlinked tmux: ~/.config/tmux (copy left)\n"
+	want := "unlinked tmux: ~/.config/tmux (link removed)\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
 }
 
-func TestUnlinkDryRunPrintsWouldUnlinkAndLeavesLink(t *testing.T) {
+func TestUnlinkDryRunPrintsWouldRemoveLinkAndLeavesLink(t *testing.T) {
 	home, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
 
@@ -343,7 +343,7 @@ links = [
 		t.Fatalf("unlink --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "would copy Package Source zsh: ~/.zshrc (soft Unlink)\n"
+	want := "would remove link zsh: ~/.zshrc (link removed)\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -380,29 +380,36 @@ links = [
 	}
 	homeBefore := snapshotTree(t, home)
 
-	out, errOut, err := executeCommand("--repo", repo, "unlink", "--dry-run", "config")
+	out, errOut, err := executeCommand(
+		"--repo",
+		repo,
+		"unlink",
+		"--leave-copy",
+		"--dry-run",
+		"config",
+	)
 	if err != nil {
 		t.Fatalf("unlink --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
-	want := "would copy Package Source config: ~/.linked (soft Unlink)\n" +
+	want := "would copy Package Source config: ~/.linked (leave-copy)\n" +
 		"already absent config: ~/.absent (no-op)\n"
 	if out != want {
 		t.Fatalf("unexpected soft unlink dry-run output\nwant: %q\ngot:  %q", want, out)
 	}
 
-	out, errOut, err = executeCommand("--repo", repo, "unlink", "--hard", "--dry-run", "config")
+	out, errOut, err = executeCommand("--repo", repo, "unlink", "--dry-run", "config")
 	if err != nil {
-		t.Fatalf("unlink --hard --dry-run failed: %v\nstderr: %s", err, errOut)
+		t.Fatalf("unlink --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
-	want = "would remove link config: ~/.linked (Hard Unlink)\n" +
+	want = "would remove link config: ~/.linked (link removed)\n" +
 		"already absent config: ~/.absent (no-op)\n"
 	if out != want {
-		t.Fatalf("unexpected hard unlink dry-run output\nwant: %q\ngot:  %q", want, out)
+		t.Fatalf("unexpected default unlink dry-run output\nwant: %q\ngot:  %q", want, out)
 	}
 	requireSnapshotUnchanged(t, home, homeBefore)
 }
 
-func TestUnlinkHardDryRunPrintsWouldHardUnlinkAndLeavesLink(t *testing.T) {
+func TestUnlinkDefaultDryRunPrintsWouldRemoveLinkAndLeavesLink(t *testing.T) {
 	home, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
 
@@ -424,12 +431,12 @@ links = [
 	}
 	homeBefore := snapshotTree(t, home)
 
-	out, errOut, err := executeCommand("--repo", repo, "unlink", "--hard", "--dry-run", "zsh")
+	out, errOut, err := executeCommand("--repo", repo, "unlink", "--dry-run", "zsh")
 	if err != nil {
-		t.Fatalf("unlink --hard --dry-run failed: %v\nstderr: %s", err, errOut)
+		t.Fatalf("unlink --dry-run failed: %v\nstderr: %s", err, errOut)
 	}
 
-	want := "would remove link zsh: ~/.zshrc (Hard Unlink)\n"
+	want := "would remove link zsh: ~/.zshrc (link removed)\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -558,7 +565,7 @@ func TestCommandSurfaceInventory(t *testing.T) {
 			name:  "unlink",
 			use:   "unlink <package>... | --all | --collection <collection>",
 			short: "Remove links for packages, all packages, or an explicit collection",
-			flags: []string{"all:", "collection:c", "dry-run:", "hard:", "target:"},
+			flags: []string{"all:", "collection:c", "dry-run:", "leave-copy:", "target:"},
 		},
 		{
 			name:  "status",
@@ -701,7 +708,7 @@ func TestHelpVersionAndCompletionAreRepositoryIndependent(t *testing.T) {
 				"Usage:\n  dotty unlink <package>... | --all | --collection <collection> [flags]\n",
 				"Options:\n      --all",
 				"  -c, --collection stringArray",
-				"      --hard",
+				"      --leave-copy",
 				"      --target stringArray",
 				"      --dry-run",
 				"Global options:\n      --repo string",
@@ -2357,7 +2364,7 @@ links = [
 	assertSymlink(t, filepath.Join(home, ".zshrc"), filepath.Join(repo, "zsh", ".zshrc"))
 }
 
-func TestUnlinkHardPrintsLinkRemoved(t *testing.T) {
+func TestUnlinkDefaultPrintsLinkRemoved(t *testing.T) {
 	home, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
 
@@ -2377,11 +2384,11 @@ links = [
 		t.Fatal(err)
 	}
 
-	out, errOut, err := executeCommand("--repo", repo, "unlink", "--hard", "zsh")
+	out, errOut, err := executeCommand("--repo", repo, "unlink", "zsh")
 	if err != nil {
-		t.Fatalf("unlink --hard failed: %v\nstderr: %s", err, errOut)
+		t.Fatalf("unlink failed: %v\nstderr: %s", err, errOut)
 	}
-	want := "hard-unlinked zsh: ~/.zshrc (link removed)\n"
+	want := "unlinked zsh: ~/.zshrc (link removed)\n"
 	if out != want {
 		t.Fatalf("unexpected output\nwant: %q\ngot:  %q", want, out)
 	}
@@ -2430,7 +2437,7 @@ links = [
 		t.Fatal(err)
 	}
 
-	out, errOut, err := executeCommand("--repo", repo, "unlink", "--all")
+	out, errOut, err := executeCommand("--repo", repo, "unlink", "--leave-copy", "--all")
 	if err != nil {
 		t.Fatalf("unlink --all failed: %v\nstderr: %s", err, errOut)
 	}

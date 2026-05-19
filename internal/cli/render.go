@@ -79,13 +79,12 @@ func linkDryRunVerb(action string) string {
 func renderUnlinkResults(out io.Writer, results []dotty.UnlinkResult) {
 	for _, result := range results {
 		verb := "unlinked"
-		note := "copy left"
-		if result.Hard {
-			verb = "hard-unlinked"
-			note = "link removed"
+		note := "link removed"
+		if result.LeaveCopy {
+			note = "copy left"
 		}
 		if result.DryRun {
-			verb, note = unlinkDryRunVerbAndNote(result.Action, result.Hard)
+			verb, note = unlinkDryRunVerbAndNote(result.Action, result.LeaveCopy)
 		}
 		fmt.Fprintf(
 			out,
@@ -98,19 +97,19 @@ func renderUnlinkResults(out io.Writer, results []dotty.UnlinkResult) {
 	}
 }
 
-func unlinkDryRunVerbAndNote(action string, hard bool) (string, string) {
+func unlinkDryRunVerbAndNote(action string, leaveCopy bool) (string, string) {
 	switch action {
 	case dotty.UnlinkResultActionCopySource:
-		return "would copy Package Source", "soft Unlink"
+		return "would copy Package Source", "leave-copy"
 	case dotty.UnlinkResultActionRemoveLink:
-		return "would remove link", "Hard Unlink"
+		return "would remove link", "link removed"
 	case dotty.UnlinkResultActionNoop:
 		return "already absent", "no-op"
 	default:
-		if hard {
-			return "would hard-unlink", "link removed"
+		if leaveCopy {
+			return "would leave copy", "copy left"
 		}
-		return "would unlink", "copy left"
+		return "would remove link", "link removed"
 	}
 }
 

@@ -54,11 +54,13 @@ func TestAddDirectoryUnlinkAndForceRelink(t *testing.T) {
 	}
 	assertTmuxPackageState(t, svc, StateLinked)
 
-	if _, err := svc.Unlink(UnlinkOptions{Packages: []string{"tmux"}}); err != nil {
+	if _, err := svc.Unlink(
+		UnlinkOptions{Packages: []string{"tmux"}, LeaveCopy: true},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if info, err := os.Lstat(tmuxTarget); err != nil || !info.IsDir() {
-		t.Fatalf("soft unlink should leave a directory copy, info=%v err=%v", info, err)
+		t.Fatalf("leave-copy unlink should leave a directory copy, info=%v err=%v", info, err)
 	}
 	assertTmuxPackageState(t, svc, StateConflict)
 

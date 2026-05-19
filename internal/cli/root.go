@@ -244,7 +244,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 	var collections []string
 	var targets []string
 	var all bool
-	var hard bool
+	var leaveCopy bool
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:               "unlink <package>... | --all | --collection <collection>",
@@ -262,7 +262,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 					Collections: collections,
 					Targets:     targets,
 					All:         all,
-					Hard:        hard,
+					LeaveCopy:   leaveCopy,
 					DryRun:      dryRun,
 				},
 			)
@@ -278,7 +278,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 		StringArrayVarP(&collections, "collection", "c", nil, "collection to unlink (can be repeated)")
 	mustRegisterFlagCompletion(cmd, "collection", a.completeCollections)
 	cmd.Flags().
-		BoolVar(&hard, "hard", false, "remove expected links without leaving target-side copies")
+		BoolVar(&leaveCopy, "leave-copy", false, "replace expected links with target-side copies")
 	cmd.Flags().StringArrayVar(&targets, "target", nil, "Target Path to unlink (can be repeated)")
 	mustRegisterFlagCompletion(cmd, "target", a.completeTargets)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")

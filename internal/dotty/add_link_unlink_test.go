@@ -1768,7 +1768,7 @@ packages = ["tmux", "scripts"]
 	assertSymlink(t, filepath.Join(home, ".config", "tmux"), filepath.Join(repo, "tmux"))
 }
 
-func TestUnlinkHandlesAbsentTargetsAndHardUnlinkWithoutSource(t *testing.T) {
+func TestUnlinkHandlesAbsentTargetsAndDefaultUnlinkWithoutSource(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	svc := NewService(repo, env)
 
@@ -1781,12 +1781,12 @@ func TestUnlinkHandlesAbsentTargetsAndHardUnlinkWithoutSource(t *testing.T) {
 	target := filepath.Join(home, ".zshrc")
 	expectedSource := filepath.Join(repo, "zsh", ".zshrc")
 	requireNoError(t, os.Symlink(expectedSource, target))
-	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}, Hard: true})
+	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
 	requireNoError(t, err)
 	requireNoPath(t, target)
 }
 
-func TestUnlinkDryRunLeavesSoftAndHardTargetsUnchanged(t *testing.T) {
+func TestUnlinkDryRunLeavesLeaveCopyAndDefaultTargetsUnchanged(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
 	writeTextFile(t, source, "export EDITOR=vim\n")
@@ -1794,17 +1794,19 @@ func TestUnlinkDryRunLeavesSoftAndHardTargetsUnchanged(t *testing.T) {
 	requireNoError(t, os.Symlink(source, target))
 	svc := NewService(repo, env)
 
-	results, err := svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}, DryRun: true})
+	results, err := svc.Unlink(
+		UnlinkOptions{Packages: []string{"zsh"}, LeaveCopy: true, DryRun: true},
+	)
 	requireNoError(t, err)
-	if len(results) != 1 || !results[0].DryRun || results[0].Hard {
-		t.Fatalf("unexpected soft unlink dry-run results: %#v", results)
+	if len(results) != 1 || !results[0].DryRun || !results[0].LeaveCopy {
+		t.Fatalf("unexpected leave-copy unlink dry-run results: %#v", results)
 	}
 	assertSymlink(t, target, source)
 
-	results, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}, Hard: true, DryRun: true})
+	results, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}, DryRun: true})
 	requireNoError(t, err)
-	if len(results) != 1 || !results[0].DryRun || !results[0].Hard {
-		t.Fatalf("unexpected hard unlink dry-run results: %#v", results)
+	if len(results) != 1 || !results[0].DryRun || results[0].LeaveCopy {
+		t.Fatalf("unexpected default unlink dry-run results: %#v", results)
 	}
 	assertSymlink(t, target, source)
 }
@@ -1824,29 +1826,45 @@ links = [
 	linkedTarget := filepath.Join(home, ".linked")
 	requireNoError(t, os.Symlink(linkedSource, linkedTarget))
 
-	softResults, err := NewService(repo, env).Unlink(UnlinkOptions{
-		Packages: []string{"config"},
-		DryRun:   true,
+	leaveCopyResults, err := NewService(repo, env).Unlink(UnlinkOptions{
+		Packages:  []string{"config"},
+		LeaveCopy: true,
+		DryRun:    true,
 	})
 	requireNoError(t, err)
-	if got, want := unlinkResultActions(softResults), []string{"copy-source", "noop"}; strings.Join(
+	if got, want := unlinkResultActions(
+		leaveCopyResults,
+	), []string{
+		"copy-source",
+		"noop",
+	}; strings.Join(
 		got,
 		"\n",
-	) != strings.Join(want, "\n") {
-		t.Fatalf("unexpected soft unlink dry-run actions\nwant: %#v\ngot:  %#v", want, got)
+	) != strings.Join(
+		want,
+		"\n",
+	) {
+		t.Fatalf("unexpected leave-copy unlink dry-run actions\nwant: %#v\ngot:  %#v", want, got)
 	}
 
-	hardResults, err := NewService(repo, env).Unlink(UnlinkOptions{
+	defaultResults, err := NewService(repo, env).Unlink(UnlinkOptions{
 		Packages: []string{"config"},
-		Hard:     true,
 		DryRun:   true,
 	})
 	requireNoError(t, err)
-	if got, want := unlinkResultActions(hardResults), []string{"remove-link", "noop"}; strings.Join(
+	if got, want := unlinkResultActions(
+		defaultResults,
+	), []string{
+		"remove-link",
+		"noop",
+	}; strings.Join(
 		got,
 		"\n",
-	) != strings.Join(want, "\n") {
-		t.Fatalf("unexpected hard unlink dry-run actions\nwant: %#v\ngot:  %#v", want, got)
+	) != strings.Join(
+		want,
+		"\n",
+	) {
+		t.Fatalf("unexpected default unlink dry-run actions\nwant: %#v\ngot:  %#v", want, got)
 	}
 	assertSymlink(t, linkedTarget, linkedSource)
 	requireNoPath(t, filepath.Join(home, ".absent"))
@@ -1866,7 +1884,10 @@ links = [
 	target := filepath.Join(home, ".config", "zsh")
 	requireNoError(t, os.Symlink(source, target))
 
-	_, err := NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}, DryRun: true})
+	_, err := NewService(
+		repo,
+		env,
+	).Unlink(UnlinkOptions{Packages: []string{"zsh"}, LeaveCopy: true, DryRun: true})
 	requireErrorContains(t, err, "unsupported file type")
 	assertSymlink(t, target, source)
 }
@@ -1910,7 +1931,7 @@ links = [
 		os.Symlink(filepath.Join(repo, "zsh", ".zshrc"), filepath.Join(home, ".zshrc")),
 	)
 
-	results, err := NewService(repo, env).Unlink(UnlinkOptions{All: true, Hard: true})
+	results, err := NewService(repo, env).Unlink(UnlinkOptions{All: true})
 	requireNoError(t, err)
 	requireUnlinkResultPackages(t, results, []string{"tmux", "zsh"})
 	requireNoPath(t, filepath.Join(home, ".config", "tmux"))
@@ -1941,15 +1962,15 @@ links = [
 		Targets:  []string{"~/.local/bin/sesh-fzf"},
 	})
 	requireNoError(t, err)
-	if len(results) != 1 || results[0].Target != "~/.local/bin/sesh-fzf" || results[0].Hard {
+	if len(results) != 1 || results[0].Target != "~/.local/bin/sesh-fzf" || results[0].LeaveCopy {
 		t.Fatalf("unexpected partial unlink results: %#v", results)
 	}
 
 	assertSymlink(t, docxTarget, docxSource)
-	requireFileContent(t, seshTarget, "sesh-fzf\n")
+	requireNoPath(t, seshTarget)
 }
 
-func TestHardUnlinkTargetsOnlySelectedLinkMappings(t *testing.T) {
+func TestDefaultUnlinkTargetsOnlySelectedLinkMappings(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.scripts]
@@ -1971,11 +1992,10 @@ links = [
 	results, err := NewService(repo, env).Unlink(UnlinkOptions{
 		Packages: []string{"scripts"},
 		Targets:  []string{"~/.local/bin/sesh-fzf"},
-		Hard:     true,
 	})
 	requireNoError(t, err)
-	if len(results) != 1 || results[0].Target != "~/.local/bin/sesh-fzf" || !results[0].Hard {
-		t.Fatalf("unexpected partial hard unlink results: %#v", results)
+	if len(results) != 1 || results[0].Target != "~/.local/bin/sesh-fzf" || results[0].LeaveCopy {
+		t.Fatalf("unexpected partial default unlink results: %#v", results)
 	}
 
 	assertSymlink(t, docxTarget, docxSource)
@@ -2002,7 +2022,7 @@ func TestUnlinkRefusesConflictsAndWrongSymlinks(t *testing.T) {
 	assertSymlink(t, target, wrongSource)
 }
 
-func TestSoftUnlinkCopiesSourceAndFailsWhenSourceIsMissing(t *testing.T) {
+func TestLeaveCopyUnlinkCopiesSourceAndFailsWhenSourceIsMissing(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
 	writeTextFile(t, source, "export EDITOR=vim\n")
@@ -2010,19 +2030,19 @@ func TestSoftUnlinkCopiesSourceAndFailsWhenSourceIsMissing(t *testing.T) {
 	requireNoError(t, os.Symlink(source, target))
 	svc := NewService(repo, env)
 
-	_, err := svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	_, err := svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}, LeaveCopy: true})
 	requireNoError(t, err)
 	requireFileContent(t, target, "export EDITOR=vim\n")
 
 	requireNoError(t, os.Remove(target))
 	requireNoError(t, os.Remove(source))
 	requireNoError(t, os.Symlink(source, target))
-	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}, LeaveCopy: true})
 	requireErrorContains(t, err, "source \".zshrc\" is missing")
 	assertSymlink(t, target, source)
 }
 
-func TestSoftUnlinkPrevalidatesCopyabilityBeforeRemovingLink(t *testing.T) {
+func TestLeaveCopyUnlinkPrevalidatesCopyabilityBeforeRemovingLink(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
@@ -2038,14 +2058,14 @@ links = [
 	manifestBefore, err := os.ReadFile(ManifestPath(repo))
 	requireNoError(t, err)
 
-	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}, LeaveCopy: true})
 	requireErrorContains(t, err, "unsupported file type")
 
 	assertSymlink(t, target, source)
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 }
 
-func TestSoftUnlinkPrevalidatesNestedSymlinkReferentBeforeRemovingLink(t *testing.T) {
+func TestLeaveCopyUnlinkPrevalidatesNestedSymlinkReferentBeforeRemovingLink(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.app]
@@ -2067,7 +2087,7 @@ links = [
 	manifestBefore, err := os.ReadFile(ManifestPath(repo))
 	requireNoError(t, err)
 
-	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}})
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}, LeaveCopy: true})
 	requireErrorContains(t, err, "unsupported file type")
 
 	assertSymlink(t, target, source)
@@ -2080,7 +2100,7 @@ links = [
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 }
 
-func TestSoftUnlinkAllowsInternalSymlinkToHardlinkedFileAndBreaksTargetAlias(t *testing.T) {
+func TestLeaveCopyUnlinkAllowsInternalSymlinkToHardlinkedFileAndBreaksTargetAlias(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.app]
@@ -2104,7 +2124,7 @@ links = [
 	manifestBefore, err := os.ReadFile(ManifestPath(repo))
 	requireNoError(t, err)
 
-	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}})
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}, LeaveCopy: true})
 	requireNoError(t, err)
 
 	targetToken := filepath.Join(target, "token")
@@ -2126,7 +2146,7 @@ links = [
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 }
 
-func TestSoftUnlinkPrevalidatesNestedSymlinkReferentHardlinksBeforeRemovingLink(t *testing.T) {
+func TestLeaveCopyUnlinkPrevalidatesNestedSymlinkReferentHardlinksBeforeRemovingLink(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.app]
@@ -2152,7 +2172,7 @@ links = [
 	manifestBefore, err := os.ReadFile(ManifestPath(repo))
 	requireNoError(t, err)
 
-	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}})
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}, LeaveCopy: true})
 	requireErrorContains(t, err, "external hardlink")
 
 	assertSymlink(t, target, source)
@@ -2168,7 +2188,7 @@ links = [
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 }
 
-func TestSoftUnlinkRejectsAbsoluteInternalSymlinkToExternalHardlinkReferent(t *testing.T) {
+func TestLeaveCopyUnlinkRejectsAbsoluteInternalSymlinkToExternalHardlinkReferent(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.app]
@@ -2192,7 +2212,7 @@ links = [
 	manifestBefore, err := os.ReadFile(ManifestPath(repo))
 	requireNoError(t, err)
 
-	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}})
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}, LeaveCopy: true})
 	requireErrorContains(t, err, "external hardlink")
 
 	assertSymlink(t, target, source)
@@ -2208,7 +2228,7 @@ links = [
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 }
 
-func TestSoftUnlinkLeavesTargetCopyAsConflictForStatusAndPlainLink(t *testing.T) {
+func TestLeaveCopyUnlinkLeavesTargetCopyAsConflictForStatusAndPlainLink(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
 	writeTextFile(t, source, "export EDITOR=vim\n")
@@ -2218,7 +2238,7 @@ func TestSoftUnlinkLeavesTargetCopyAsConflictForStatusAndPlainLink(t *testing.T)
 	manifestBefore, err := os.ReadFile(ManifestPath(repo))
 	requireNoError(t, err)
 
-	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}, LeaveCopy: true})
 	requireNoError(t, err)
 
 	requireFileContent(t, target, "export EDITOR=vim\n")
@@ -2232,7 +2252,7 @@ func TestSoftUnlinkLeavesTargetCopyAsConflictForStatusAndPlainLink(t *testing.T)
 	assertZshPackageState(t, svc, StateConflict)
 }
 
-func TestSoftUnlinkMaterializesTopLevelSourceSymlinkReferent(t *testing.T) {
+func TestLeaveCopyUnlinkMaterializesTopLevelSourceSymlinkReferent(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
@@ -2253,7 +2273,7 @@ links = [
 	requireNoError(t, err)
 	assertSymlink(t, target, linkSource)
 
-	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	_, err = svc.Unlink(UnlinkOptions{Packages: []string{"zsh"}, LeaveCopy: true})
 	requireNoError(t, err)
 
 	info, err := os.Lstat(target)
@@ -2269,7 +2289,7 @@ links = [
 	requireFileContent(t, realSource, "source inside package\n")
 }
 
-func TestHardUnlinkWithMissingSourceOnlyRemovesExpectedLinks(t *testing.T) {
+func TestDefaultUnlinkWithMissingSourceOnlyRemovesExpectedLinks(t *testing.T) {
 	tests := []struct {
 		name       string
 		setup      func(t *testing.T, home, source, target string)
@@ -2334,7 +2354,6 @@ func TestHardUnlinkWithMissingSourceOnlyRemovesExpectedLinks(t *testing.T) {
 
 			_, err = NewService(repo, env).Unlink(UnlinkOptions{
 				Packages: []string{"zsh"},
-				Hard:     true,
 			})
 			if tt.wantErr == "" {
 				requireNoError(t, err)
@@ -2349,7 +2368,7 @@ func TestHardUnlinkWithMissingSourceOnlyRemovesExpectedLinks(t *testing.T) {
 	}
 }
 
-func TestHardUnlinkDryRunRejectsAbsentTargetUnderSymlinkedParent(t *testing.T) {
+func TestDefaultUnlinkDryRunRejectsAbsentTargetUnderSymlinkedParent(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.app]
@@ -2367,7 +2386,6 @@ links = [
 
 	_, err := NewService(repo, env).Unlink(UnlinkOptions{
 		Packages: []string{"app"},
-		Hard:     true,
 		DryRun:   true,
 	})
 	requireErrorContains(t, err, "Target Path")
@@ -2376,7 +2394,7 @@ links = [
 	requireFileContent(t, source, "managed config\n")
 }
 
-func TestHardUnlinkRejectsSymlinkedTargetParentWithoutRemovingReferentLink(t *testing.T) {
+func TestDefaultUnlinkRejectsSymlinkedTargetParentWithoutRemovingReferentLink(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.app]
@@ -2394,14 +2412,14 @@ links = [
 	referentLink := filepath.Join(externalParent, "config")
 	requireNoError(t, os.Symlink(source, referentLink))
 
-	_, err := NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}, Hard: true})
+	_, err := NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"app"}})
 	requireErrorContains(t, err, "Target Path")
 	assertSymlink(t, targetParent, externalParent)
 	assertSymlink(t, referentLink, source)
 	requireFileContent(t, source, "managed config\n")
 }
 
-func TestHardUnlinkWithBrokenPackageSourceSymlinkOnlyRemovesExpectedLink(t *testing.T) {
+func TestDefaultUnlinkWithBrokenPackageSourceSymlinkOnlyRemovesExpectedLink(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
 	missing := filepath.Join(home, "missing-zshrc")
@@ -2414,7 +2432,6 @@ func TestHardUnlinkWithBrokenPackageSourceSymlinkOnlyRemovesExpectedLink(t *test
 
 	_, err = NewService(repo, env).Unlink(UnlinkOptions{
 		Packages: []string{"zsh"},
-		Hard:     true,
 	})
 	requireNoError(t, err)
 
@@ -2423,7 +2440,7 @@ func TestHardUnlinkWithBrokenPackageSourceSymlinkOnlyRemovesExpectedLink(t *test
 	requireFileContent(t, ManifestPath(repo), string(manifestBefore))
 }
 
-func TestSoftUnlinkRollsBackRemovedLinkWhenCopyFailsDuringExecution(t *testing.T) {
+func TestLeaveCopyUnlinkRollsBackRemovedLinkWhenCopyFailsDuringExecution(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
 	writeTextFile(t, source, "export EDITOR=vim\n")
@@ -2433,7 +2450,7 @@ func TestSoftUnlinkRollsBackRemovedLinkWhenCopyFailsDuringExecution(t *testing.T
 	requireNoError(t, err)
 	forceCopyPathErrorAfter(t, 0, errors.New("copy during unlink failed"))
 
-	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}, LeaveCopy: true})
 	requireErrorContains(t, err, "copy during unlink failed")
 
 	assertSymlink(t, target, source)
@@ -2442,7 +2459,7 @@ func TestSoftUnlinkRollsBackRemovedLinkWhenCopyFailsDuringExecution(t *testing.T
 	assertZshPackageState(t, NewService(repo, env), StateLinked)
 }
 
-func TestSoftUnlinkRollsBackEarlierTargetCopyWhenLaterMappingCopyFails(t *testing.T) {
+func TestLeaveCopyUnlinkRollsBackEarlierTargetCopyWhenLaterMappingCopyFails(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
@@ -2463,7 +2480,7 @@ links = [
 	requireNoError(t, err)
 	forceCopyPathErrorAfter(t, 1, errors.New("second copy during unlink failed"))
 
-	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}, LeaveCopy: true})
 	requireErrorContains(t, err, "second copy during unlink failed")
 
 	assertSymlink(t, zshrcTarget, zshrcSource)
@@ -2474,7 +2491,7 @@ links = [
 	assertZshPackageState(t, NewService(repo, env), StateLinked)
 }
 
-func TestHardUnlinkRollsBackEarlierRemovalWhenLaterRemoveFails(t *testing.T) {
+func TestDefaultUnlinkRollsBackEarlierRemovalWhenLaterRemoveFails(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, `version = 1
 
 [packages.zsh]
@@ -2497,7 +2514,6 @@ links = [
 
 	_, err = NewService(repo, env).Unlink(UnlinkOptions{
 		Packages: []string{"zsh"},
-		Hard:     true,
 	})
 	requireErrorContains(t, err, "second remove during unlink failed")
 
@@ -2507,7 +2523,7 @@ links = [
 	assertZshPackageState(t, NewService(repo, env), StateLinked)
 }
 
-func TestUnlinkReportsRollbackFailure(t *testing.T) {
+func TestLeaveCopyUnlinkReportsRollbackFailure(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	source := filepath.Join(repo, "zsh", ".zshrc")
 	writeTextFile(t, source, "export EDITOR=vim\n")
@@ -2518,7 +2534,7 @@ func TestUnlinkReportsRollbackFailure(t *testing.T) {
 	forceCopyPathErrorAfter(t, 0, errors.New("copy during unlink failed"))
 	forceSymlinkPathError(t, errors.New("restore symlink failed"))
 
-	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}})
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{Packages: []string{"zsh"}, LeaveCopy: true})
 	requireErrorContains(t, err, "copy during unlink failed")
 	requireErrorContains(t, err, "rollback failed")
 	requireErrorContains(t, err, "restore symlink failed")

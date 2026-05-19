@@ -11,16 +11,16 @@ type UnlinkOptions struct {
 	Collections []string
 	Targets     []string
 	All         bool
-	Hard        bool
+	LeaveCopy   bool
 	DryRun      bool
 }
 
 type UnlinkResult struct {
-	Package string
-	Target  string
-	Action  string
-	Hard    bool
-	DryRun  bool
+	Package   string
+	Target    string
+	Action    string
+	LeaveCopy bool
+	DryRun    bool
 }
 
 type unlinkAction struct {
@@ -29,7 +29,7 @@ type unlinkAction struct {
 	sourceAbs     string
 	copySourceAbs string
 	targetAbs     string
-	hard          bool
+	leaveCopy     bool
 	state         unlinkTargetState
 }
 
@@ -78,24 +78,24 @@ func (s Service) unlinkResults(plan *unlinkPlan, dryRun bool) []UnlinkResult {
 	results := make([]UnlinkResult, len(plan.actions))
 	for i, a := range plan.actions {
 		results[i] = UnlinkResult{
-			Package: a.packageName,
-			Target:  a.mapping.Target,
-			Action:  unlinkResultAction(a.state, a.hard),
-			Hard:    a.hard,
-			DryRun:  dryRun,
+			Package:   a.packageName,
+			Target:    a.mapping.Target,
+			Action:    unlinkResultAction(a.state, a.leaveCopy),
+			LeaveCopy: a.leaveCopy,
+			DryRun:    dryRun,
 		}
 	}
 	return results
 }
 
-func unlinkResultAction(state unlinkTargetState, hard bool) string {
+func unlinkResultAction(state unlinkTargetState, leaveCopy bool) string {
 	if state == unlinkTargetAbsent {
 		return UnlinkResultActionNoop
 	}
-	if hard {
-		return UnlinkResultActionRemoveLink
+	if leaveCopy {
+		return UnlinkResultActionCopySource
 	}
-	return UnlinkResultActionCopySource
+	return UnlinkResultActionRemoveLink
 }
 
 func (s Service) planUnlink(options UnlinkOptions) (*unlinkPlan, error) {
@@ -117,7 +117,7 @@ func (s Service) planUnlink(options UnlinkOptions) (*unlinkPlan, error) {
 
 	plan := &unlinkPlan{}
 	for _, mapping := range selected {
-		action, err := s.classifyUnlinkAction(mapping.Package, mapping.Link, options.Hard)
+		action, err := s.classifyUnlinkAction(mapping.Package, mapping.Link, options.LeaveCopy)
 		if err != nil {
 			return nil, err
 		}
@@ -129,13 +129,13 @@ func (s Service) planUnlink(options UnlinkOptions) (*unlinkPlan, error) {
 func (s Service) classifyUnlinkAction(
 	packageName string,
 	mapping LinkMapping,
-	hard bool,
+	leaveCopy bool,
 ) (unlinkAction, error) {
-	action := unlinkAction{packageName: packageName, mapping: mapping, hard: hard}
+	action := unlinkAction{packageName: packageName, mapping: mapping, leaveCopy: leaveCopy}
 
-	sourceAbs, err := PackageSourcePath(s.Repo, packageName, mapping.Source)
-	if hard {
-		sourceAbs, err = packageSourcePathLexical(s.Repo, packageName, mapping.Source)
+	sourceAbs, err := packageSourcePathLexical(s.Repo, packageName, mapping.Source)
+	if leaveCopy {
+		sourceAbs, err = PackageSourcePath(s.Repo, packageName, mapping.Source)
 	}
 	if err != nil {
 		return action, err
@@ -147,11 +147,11 @@ func (s Service) classifyUnlinkAction(
 		return action, err
 	}
 	action.targetAbs = targetAbs
-	if hard {
-		if err := validateTargetTopology(targetAbs, s.Repo, s.Env); err != nil {
+	if leaveCopy {
+		if err := validateLinkMappingTopology(s.Repo, packageName, mapping, s.Env); err != nil {
 			return action, err
 		}
-	} else if err := validateLinkMappingTopology(s.Repo, packageName, mapping, s.Env); err != nil {
+	} else if err := validateTargetTopology(targetAbs, s.Repo, s.Env); err != nil {
 		return action, err
 	}
 
@@ -183,13 +183,13 @@ func (s Service) classifyUnlinkAction(
 	}
 	action.state = unlinkTargetCorrect
 
-	// For soft unlink, validate that the source copy can be materialized during planning.
-	if !hard {
+	// For --leave-copy unlink, validate that the source copy can be materialized during planning.
+	if leaveCopy {
 		if exists, err := pathExists(sourceAbs); err != nil {
 			return action, err
 		} else if !exists {
 			return action, fmt.Errorf(
-				"package %q source %q is missing (restore the Package Source or use --hard to remove only the Link)",
+				"package %q source %q is missing (restore the Package Source or omit --leave-copy to remove only the Link)",
 				packageName,
 				mapping.Source,
 			)
@@ -203,7 +203,7 @@ func (s Service) classifyUnlinkAction(
 			return action, err
 		} else if !exists {
 			return action, fmt.Errorf(
-				"package %q source %q is missing (restore the Package Source or use --hard to remove only the Link)",
+				"package %q source %q is missing (restore the Package Source or omit --leave-copy to remove only the Link)",
 				packageName,
 				mapping.Source,
 			)
@@ -252,7 +252,7 @@ func (s Service) executeUnlinkAction(tx *Tx, action *unlinkAction) error {
 		return nil
 	}
 
-	if action.hard {
+	if !action.leaveCopy {
 		return RemoveSymlinkTx(tx, action.targetAbs)
 	}
 
