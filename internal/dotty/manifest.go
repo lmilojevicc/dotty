@@ -50,11 +50,11 @@ func ValidateManifest(manifest *Manifest, env Env) error {
 		return fmt.Errorf("unsupported manifest version %d", manifest.Version)
 	}
 
-	targets := map[string]string{}
 	for name, pkg := range manifest.Packages {
 		if err := validateName("package", name); err != nil {
 			return err
 		}
+		targets := map[string]string{}
 		for i, link := range pkg.Links {
 			if err := validateSourcePath(link.Source); err != nil {
 				return fmt.Errorf("package %q link %d: %w", name, i+1, err)
@@ -69,13 +69,14 @@ func ValidateManifest(manifest *Manifest, env Env) error {
 			key := filepath.Clean(targetAbs)
 			if prev, ok := targets[key]; ok {
 				return fmt.Errorf(
-					"target %q is mapped more than once (%s and %s) (edit dotty.toml so each Target Path appears once)",
+					"package %q target %q is mapped more than once (%s and %s) (edit dotty.toml so each Target Path appears once)",
+					name,
 					link.Target,
 					prev,
-					name,
+					link.Source,
 				)
 			}
-			targets[key] = name
+			targets[key] = link.Source
 		}
 	}
 

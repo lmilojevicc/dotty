@@ -52,6 +52,19 @@ func TestValidateManifestNormalizesNilMaps(t *testing.T) {
 	}
 }
 
+func TestValidateManifestAllowsCrossPackageDuplicateTargets(t *testing.T) {
+	_, env := setupHome(t)
+	manifest := &Manifest{
+		Version: ManifestVersion,
+		Packages: map[string]Package{
+			"tmux-macos": {Links: []LinkMapping{{Source: ".", Target: "~/.config/tmux"}}},
+			"tmux-linux": {Links: []LinkMapping{{Source: ".", Target: "~/.config/tmux"}}},
+		},
+	}
+
+	requireNoError(t, ValidateManifest(manifest, env))
+}
+
 func TestValidateManifestRejectsInvalidManifestShape(t *testing.T) {
 	home, env := setupHome(t)
 	absTarget := filepath.Join(home, ".zshrc")
@@ -120,14 +133,6 @@ func TestValidateManifestRejectsInvalidManifestShape(t *testing.T) {
 			wantErr: "unsupported home syntax",
 		},
 		{
-			name: "duplicate expanded target",
-			manifest: &Manifest{Version: ManifestVersion, Packages: map[string]Package{
-				"a": {Links: []LinkMapping{{Source: ".zshrc", Target: "~/.zshrc"}}},
-				"b": {Links: []LinkMapping{{Source: ".zshrc", Target: absTarget}}},
-			}},
-			wantErr: "mapped more than once",
-		},
-		{
 			name: "duplicate expanded target within same package",
 			manifest: &Manifest{Version: ManifestVersion, Packages: map[string]Package{
 				"zsh": {Links: []LinkMapping{
@@ -194,8 +199,10 @@ func TestValidateManifestRejectsInvalidManifestShape(t *testing.T) {
 func TestValidateManifestDuplicateTargetErrorIncludesActionableHint(t *testing.T) {
 	home, env := setupHome(t)
 	manifest := &Manifest{Version: ManifestVersion, Packages: map[string]Package{
-		"a": {Links: []LinkMapping{{Source: ".zshrc", Target: "~/.zshrc"}}},
-		"b": {Links: []LinkMapping{{Source: ".zshrc", Target: filepath.Join(home, ".zshrc")}}},
+		"zsh": {Links: []LinkMapping{
+			{Source: ".zshrc", Target: "~/.zshrc"},
+			{Source: ".zprofile", Target: filepath.Join(home, ".zshrc")},
+		}},
 	}}
 
 	err := ValidateManifest(manifest, env)
