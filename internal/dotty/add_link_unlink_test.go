@@ -1682,6 +1682,60 @@ links = [
 	assertSymlink(t, filepath.Join(home, ".zshrc"), filepath.Join(repo, "zsh", ".zshrc"))
 }
 
+func TestLinkRejectsSelectedCompetingMappings(t *testing.T) {
+	_, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.tmux-macos]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[packages.tmux-linux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[collections.tmux]
+packages = ["tmux-macos", "tmux-linux"]
+`)
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux-macos"), 0o755))
+	requireNoError(t, os.MkdirAll(filepath.Join(repo, "tmux-linux"), 0o755))
+	svc := NewService(repo, env)
+
+	tests := []struct {
+		name    string
+		options LinkOptions
+	}{
+		{
+			name:    "explicit packages",
+			options: LinkOptions{Packages: []string{"tmux-macos", "tmux-linux"}, DryRun: true},
+		},
+		{
+			name:    "all packages",
+			options: LinkOptions{All: true, DryRun: true},
+		},
+		{
+			name:    "collection",
+			options: LinkOptions{Collections: []string{"tmux"}, DryRun: true},
+		},
+		{
+			name: "force still rejected",
+			options: LinkOptions{
+				Packages: []string{"tmux-macos", "tmux-linux"},
+				Force:    true,
+				DryRun:   true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.Link(tt.options)
+			requireErrorContains(t, err, "competing selected mappings")
+		})
+	}
+}
+
 func TestLinkTrackCreatesMappingAndLinksSelectedSource(t *testing.T) {
 	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")

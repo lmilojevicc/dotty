@@ -97,6 +97,9 @@ func (s Service) planLinkWithManifest(manifest *Manifest, options LinkOptions) (
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectCompetingSelectedLinkMappings(selected, s.Env); err != nil {
+		return nil, err
+	}
 
 	plan := &linkPlan{}
 	for _, mapping := range selected {
@@ -171,6 +174,26 @@ func (s Service) resolveTrackedLinkSelections(
 		})
 	}
 	return selected, nil
+}
+
+func rejectCompetingSelectedLinkMappings(selected []SelectedLinkMapping, env Env) error {
+	seen := map[string]SelectedLinkMapping{}
+	for _, item := range selected {
+		key, err := targetKey(item.Link.Target, env)
+		if err != nil {
+			return err
+		}
+		if previous, ok := seen[key]; ok {
+			return fmt.Errorf(
+				"competing selected mappings target %q from packages %q and %q (select only one alternative or use a narrower selector)",
+				item.Link.Target,
+				previous.Package,
+				item.Package,
+			)
+		}
+		seen[key] = item
+	}
+	return nil
 }
 
 func (s Service) classifyLinkAction(
