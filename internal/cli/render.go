@@ -128,6 +128,45 @@ func renderMapResult(out io.Writer, result *dotty.MapResult) {
 	)
 }
 
+func renderTrackResults(out io.Writer, results []dotty.TrackResult) {
+	for _, result := range results {
+		verb := "tracked"
+		if result.DryRun {
+			verb = "would track"
+		}
+		fmt.Fprintf(
+			out,
+			"%s %s: %s -> %s\n",
+			successStyle.Render(verb),
+			packageStyle.Render(result.Package),
+			pathStyle.Render(result.Target),
+			sourceStyle.Render(result.Source),
+		)
+	}
+}
+
+func renderUntrackResults(out io.Writer, results []dotty.UntrackResult) {
+	for _, result := range results {
+		verb := "untracked"
+		if result.DryRun {
+			verb = "would untrack"
+		}
+		note := ""
+		if result.LinkExists {
+			note = " (link still exists)"
+		}
+		fmt.Fprintf(
+			out,
+			"%s %s: %s -> %s%s\n",
+			successStyle.Render(verb),
+			packageStyle.Render(result.Package),
+			pathStyle.Render(result.Target),
+			sourceStyle.Render(result.Source),
+			mutedStyle.Render(note),
+		)
+	}
+}
+
 func renderUnmapResults(out io.Writer, results []dotty.UnmapResult) {
 	for _, result := range results {
 		verb := "unmapped"

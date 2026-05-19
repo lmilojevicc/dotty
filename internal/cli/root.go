@@ -43,6 +43,8 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 	cmd.AddCommand(app.addCommand())
 	cmd.AddCommand(app.mapCommand())
 	cmd.AddCommand(app.unmapCommand())
+	cmd.AddCommand(app.trackCommand())
+	cmd.AddCommand(app.untrackCommand())
 	cmd.AddCommand(app.linkCommand())
 	cmd.AddCommand(app.unlinkCommand())
 	cmd.AddCommand(app.statusCommand())
@@ -192,6 +194,80 @@ func (a *app) unmapCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
 	cmd.Flags().StringArrayVar(&targets, "target", nil, "Target Path to unmap (can be repeated)")
+	mustRegisterFlagCompletion(cmd, "target", a.completeTargets)
+	return cmd
+}
+
+func (a *app) trackCommand() *cobra.Command {
+	var targets []string
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:               "track <selector> [target...]",
+		Short:             "Add Manifest Link Mappings for an existing Package Source",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: cobra.NoFileCompletions,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			svc, err := a.service()
+			if err != nil {
+				return err
+			}
+			selector, err := dotty.ParseSelector(args[0])
+			if err != nil {
+				return err
+			}
+			allTargets := append([]string{}, args[1:]...)
+			allTargets = append(allTargets, targets...)
+			tracked, err := svc.Track(dotty.TrackOptions{
+				Selector: selector,
+				Targets:  allTargets,
+				DryRun:   dryRun,
+			})
+			if err != nil {
+				return err
+			}
+			renderTrackResults(a.out, tracked)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
+	cmd.Flags().StringArrayVar(&targets, "target", nil, "Target Path to track (can be repeated)")
+	mustRegisterFlagCompletion(cmd, "target", completeDirectories)
+	return cmd
+}
+
+func (a *app) untrackCommand() *cobra.Command {
+	var targets []string
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:               "untrack <selector> [target...]",
+		Short:             "Remove Manifest Link Mappings without changing files",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: cobra.NoFileCompletions,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			svc, err := a.service()
+			if err != nil {
+				return err
+			}
+			selector, err := dotty.ParseSelector(args[0])
+			if err != nil {
+				return err
+			}
+			allTargets := append([]string{}, args[1:]...)
+			allTargets = append(allTargets, targets...)
+			untracked, err := svc.Untrack(dotty.UntrackOptions{
+				Selector: selector,
+				Targets:  allTargets,
+				DryRun:   dryRun,
+			})
+			if err != nil {
+				return err
+			}
+			renderUntrackResults(a.out, untracked)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
+	cmd.Flags().StringArrayVar(&targets, "target", nil, "Target Path to untrack (can be repeated)")
 	mustRegisterFlagCompletion(cmd, "target", a.completeTargets)
 	return cmd
 }
