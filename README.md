@@ -13,12 +13,13 @@ _Sync configuration files across machines using a manifest._
 
 ## Features
 
-- **Explicit manifest**: Every managed target is recorded in `dotty.toml` as a source-to-target Link Mapping.
-- **Safe by default**: Non-symlink content at a Target Path is a Conflict unless you explicitly pass `--force`.
-- **Dry runs**: Preview `add`, `map`, `unmap`, `link`, and `unlink` operations without changing files.
-- **Collections**: Link or unlink named groups of Packages.
-- **Status reporting**: See linked, unlinked, partial, conflict, missing-source, empty, and untracked states.
-- **Soft and hard unlink**: Leave a target-side copy by default, or remove only expected Dotty Links with `--hard`.
+- **Explicit manifest**: Every managed target is recorded in `dotty.toml` as a source-to-target manifest entry.
+- **Selector-based commands**: Use `package` to act on a whole package or `package/source` to act on one repository source.
+- **Safe by default**: Non-symlink content at a target is a conflict unless you explicitly pass `--force`.
+- **Dry runs**: Preview `add`, `track`, `untrack`, `link`, and `unlink` operations without changing files.
+- **Collections**: Link or unlink named groups of packages.
+- **Status reporting**: See linked, unlinked, partial, conflict, blocked, missing-source, empty, and untracked states.
+- **Unlink control**: `unlink` removes expected Dotty links by default; pass `--leave-copy` to leave target-side copies.
 
 ## Installation
 
@@ -45,7 +46,7 @@ Prebuilt archives are also available on [GitHub Releases](https://github.com/lmi
 ## Basic Workflow
 
 ```bash
-# Initialize a Dotfiles Repository and remember it as the default
+# Initialize a repository and remember it as the default
 dotty init ~/dotfiles
 
 # Move ~/.config/tmux into ~/dotfiles/tmux and link it back
@@ -54,47 +55,53 @@ dotty add ~/.config/tmux tmux
 # Preview the same add operation without writing files
 dotty add --dry-run ~/.config/tmux tmux
 
-# Add another Link Mapping for an existing Package Source without touching files
-dotty map tmux . ~/.tmux
-dotty map --dry-run tmux . ~/.tmux
+# Track an existing repository source without changing target-side files
+dotty track scripts/docx2pdf ~/.local/bin/docx2pdf
+dotty track --dry-run scripts/docx2pdf --target ~/.local/bin/docx2pdf
 
-# Remove a Link Mapping from the Manifest without touching files
-dotty unmap --dry-run tmux --target ~/.tmux
-dotty unmap tmux --target ~/.tmux
-
-# Link or unlink a Package
+# Link a package or a single source
 dotty link --dry-run tmux
 dotty link tmux
+dotty link scripts/docx2pdf
+
+# Track and link a new target in one atomic operation
+dotty link scripts/docx2pdf --target ~/.local/bin/docx2pdf --track
+
+# Unlink a package or a single source; default unlink removes expected links
 dotty unlink --dry-run tmux
 dotty unlink tmux
+dotty unlink scripts/docx2pdf
 
-# Link or unlink only one Target Path from a Package
-dotty link scripts --target ~/.local/bin/sesh-fzf
-dotty unlink scripts --target ~/.local/bin/sesh-fzf
+# Leave target-side copies instead of removing links outright
+dotty unlink --leave-copy --dry-run tmux
+dotty unlink --leave-copy tmux
 
-# Remove only expected Dotty Links without leaving target-side copies
-dotty unlink --hard --dry-run tmux
-dotty unlink --hard tmux
-dotty unlink --hard scripts --target ~/.local/bin/sesh-fzf
+# Remove manifest entries without changing target-side files
+dotty untrack scripts/docx2pdf --target ~/.local/bin/docx2pdf
 
-# Link or unlink every Package in the Manifest
+# Unlink and remove manifest entries in one atomic operation
+dotty unlink scripts/docx2pdf --target ~/.local/bin/docx2pdf --untrack
+
+# Link or unlink every package in the manifest
 dotty link --all
 dotty unlink --all
 
-# Inspect Manifest inventory and filesystem state
+# Inspect manifest inventory and filesystem state
 dotty repo
 dotty list
+dotty list scripts
 dotty status
-dotty status --state conflict
+dotty status scripts/docx2pdf
+dotty status --state blocked
 dotty status --verbose
 ```
 
 > [!WARNING]
-> `dotty link --force` destructively replaces Target Path Conflicts before creating Links. Use `dotty link --force --dry-run <package>` first when you are not certain what will be replaced.
+> `dotty link --force` destructively replaces target conflicts before creating links. Use `dotty link --force --dry-run <selector>` first when you are not certain what will be replaced.
 
 ## Manifest
 
-Dotty stores repository state in `dotty.toml` at the root of the Dotfiles Repository.
+Dotty stores repository state in `dotty.toml` at the root of the repository.
 
 ```toml
 version = 1
@@ -124,44 +131,49 @@ dotty unlink --collection terminal
 `--all` cannot be combined with package names or `--collection`.
 
 > [!NOTE]
-> Dotty normalizes `dotty.toml` when commands write the Manifest. Hand formatting and comments in the Manifest are not preserved.
+> Dotty normalizes `dotty.toml` when commands write the manifest. Hand formatting and comments in the manifest are not preserved.
 
-Use `dotty map <package> <source> <target>` to add a Link Mapping from an existing Package Source to an additional Target Path without copying, moving, or linking filesystem content. The Package and Package Source must already exist; `map` only validates and writes the Manifest. Run `dotty link` later to create the Link, using `--force` only if that Target Path is a Conflict you intentionally want to replace.
+Use `dotty track <selector> <target>` or `dotty track <selector> --target <target>` to add manifest entries for repository content that already exists. `track` only edits the manifest; it does not create target-side links.
 
-Use `dotty unmap <package> --target <target>` to remove one or more Link Mappings from the Manifest without unlinking, deleting, copying, or replacing target-side filesystem content or Package Sources. If the last Link Mapping is removed, the Package remains in the Manifest as an Empty Package. `unmap` does not change Collections.
+Use `dotty untrack <selector> [target...]` or `dotty untrack <selector> --target <target>` to remove manifest entries without unlinking, deleting, copying, or replacing target-side content. If target-side links still exist, `untrack` reports that they were not removed. If the last entry is removed, the package remains in the manifest as an empty package.
 
-Use `--target <target>` with `dotty link` or `dotty unlink` to narrow a Package, Collection, or `--all` selection to individual Target Paths. Without `--target`, `link` and `unlink` keep their whole-Package behavior.
+Use `--target <target>` with `dotty link`, `dotty unlink`, or `dotty untrack` to narrow one selector to individual targets. `--target` is not valid with multiple selectors, `--all`, or `--collection`.
+
+Competing package alternatives may declare the same target across packages. Dotty reports an alternative as `BLOCKED` when that target is currently linked by another managed package. `dotty link --force <package>` switches a blocked target to the selected package; a single command may not select two alternatives that compete for the same target.
 
 ## Commands
 
-| Command                                                           | Purpose                                                              | Useful flags                                    |
-| ----------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
-| `dotty init [<path>]`                                             | Initialize a Dotfiles Repository and remember it as the default.     | None                                            |
-| `dotty add <path> <package>`                                      | Adopt an existing file, directory, or symlink target into a Package. | `--dry-run`                                     |
-| `dotty map <package> <source> <target>`                           | Add a Manifest Link Mapping without changing files.                  | `--dry-run`                                     |
-| `dotty unmap <package> --target <target>`                         | Remove Manifest Link Mappings without changing files.                | `--target`, `--dry-run`                         |
-| `dotty link <package>... \| --all \| --collection <collection>`   | Create Links for selected Packages.                                  | `--all`, `--collection`, `--target`, `--force`, `--dry-run` |
-| `dotty unlink <package>... \| --all \| --collection <collection>` | Remove Links for selected Packages.                                  | `--all`, `--collection`, `--target`, `--hard`, `--dry-run`  |
-| `dotty status [<package>...]`                                     | Show package state inferred from the Manifest and filesystem.        | `--state`, `--verbose`, `-v`                    |
-| `dotty list`                                                      | List Packages and Collections defined in the Manifest.               | None                                            |
-| `dotty repo`                                                      | Show the resolved Dotfiles Repository and config file path.          | None                                            |
-| `dotty completion <shell>`                                        | Generate shell completion scripts.                                   | `bash`, `zsh`, `fish`, `powershell`             |
+| Command                                                           | Purpose                                                        | Useful flags                                                |
+| ----------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------- |
+| `dotty init [<path>]`                                             | Initialize a repository and remember it as the default.        | None                                                        |
+| `dotty add <path> <package>`                                      | Adopt an existing file, directory, or symlink target.          | `--dry-run`                                                 |
+| `dotty track <selector> [target...]`                              | Add manifest entries without changing target-side files.       | `--target`, `--dry-run`                                     |
+| `dotty untrack <selector> [target...]`                            | Remove manifest entries without changing target-side files.    | `--target`, `--dry-run`                                     |
+| `dotty link <package>... \| --all \| --collection <collection>`   | Create links for selected packages or `package/source` values. | `--all`, `--collection`, `--target`, `--track`, `--force`, `--dry-run` |
+| `dotty unlink <package>... \| --all \| --collection <collection>` | Remove links for selected packages or `package/source` values. | `--all`, `--collection`, `--target`, `--leave-copy`, `--untrack`, `--dry-run` |
+| `dotty status [<selector>...]`                                    | Show state inferred from the manifest and filesystem.          | `--state`, `--verbose`, `-v`                                |
+| `dotty list [<package>]`                                          | List packages and collections, or one package's entries.       | None                                                        |
+| `dotty repo`                                                      | Show the resolved repository and config file path.             | None                                                        |
+| `dotty completion <shell>`                                        | Generate shell completion scripts.                             | `bash`, `zsh`, `fish`, `powershell`                         |
 
-All commands accept the global `--repo` flag when they need to operate on a specific Dotfiles Repository.
+Commands that operate on an existing repository accept the global `--repo` flag. `dotty init` creates or records the default repository and rejects `--repo`.
 
-`dotty status` prints the resolved Dotfiles Repository, package states, untracked repository content, and a summary count. With no package arguments, it shows package summary rows plus all Untracked Repository Content discovered in the Dotfiles Repository. Package-scoped status only scans the selected Package Roots for untracked content, so top-level repository entries and unselected Packages do not leak into the result. Use `--state <state>` to keep aggregate Package rows and untracked rows that match a state. Supported values are `linked`, `unlinked`, `partial`, `conflict`, `missing-source`, `empty`, and `untracked`. Use `dotty status --verbose` or `dotty status -v` for per-Link Mapping status. A single package argument, such as `dotty status tmux`, implies verbose per-Link Mapping output for that Package and includes untracked content inside that Package Root as rows whose Target Path is `-`. Multi-package status remains aggregate-only by default; use `--verbose` or `--state untracked` to show selected package-local untracked details.
+`dotty status` prints the resolved repository, package states, untracked repository content, and a summary count. With no selector arguments, it shows package summary rows plus all untracked repository content discovered in the repository. Package-scoped status only scans the selected package roots for untracked content, so top-level repository entries and unselected packages do not leak into the result. Package/source selectors, such as `dotty status scripts/docx2pdf`, show only matching manifest entries and untracked content under that source directory. Use `--state <state>` to keep aggregate package rows and untracked rows that match a state. Supported values are `linked`, `unlinked`, `partial`, `conflict`, `blocked`, `missing-source`, `empty`, and `untracked`. Use `dotty status --verbose` or `dotty status -v` for per-entry status. A single selector implies verbose output; multi-selector status remains aggregate-only by default unless you use `--verbose` or `--state untracked`.
+
+`dotty list` remains aggregate inventory by default. `dotty list <package>` prints that package's manifest entries without checking filesystem state. `list` accepts package selectors only, not `package/source` selectors.
 
 ## Status States
 
 Dotty renders status labels in uppercase, while `--state` accepts lowercase or kebab-case filter values:
 
-- `LINKED` (`--state linked`): the Target Path is a symlink to the expected Package Source.
-- `UNLINKED` (`--state unlinked`): the Package Source exists and the Target Path does not exist.
-- `PARTIAL` (`--state partial`): a Package has mixed Link Mapping states.
-- `CONFLICT` (`--state conflict`): the Target Path exists as non-symlink content or points to another source.
-- `MISSING SOURCE` (`--state missing-source`): the Manifest references a Package Source that does not exist.
-- `EMPTY` (`--state empty`): the Package has no Link Mappings.
-- `UNTRACKED` (`--state untracked`): repository content or selected package-local content is not represented in the Manifest.
+- `LINKED` (`--state linked`): the target is a symlink to the expected source.
+- `UNLINKED` (`--state unlinked`): the source exists and the target does not exist.
+- `PARTIAL` (`--state partial`): a package has mixed manifest-entry states.
+- `CONFLICT` (`--state conflict`): the target exists as non-symlink content or points to another source.
+- `BLOCKED` (`--state blocked`): the target is currently linked by another managed package.
+- `MISSING SOURCE` (`--state missing-source`): the manifest references a source that does not exist.
+- `EMPTY` (`--state empty`): the package has no manifest entries.
+- `UNTRACKED` (`--state untracked`): repository content or selected package-local content is not represented in the manifest.
 
 ## Advanced
 
@@ -176,7 +188,7 @@ dotty completion fish
 dotty completion powershell
 ```
 
-Generated completions suggest Dotty-aware values when the Manifest can be resolved: Packages, Collections, status states, Manifest Target Paths for `--target`, and Package Source paths for `dotty map <package> <tab>`. Path arguments such as `dotty add <tab>`, `dotty init <tab>`, `dotty map <package> <source> <tab>`, and `--repo <tab>` keep filesystem completion.
+Generated completions suggest Dotty-aware values when the manifest can be resolved: packages, `package/source` selectors, collections, status states, and mapped targets for `--target`. `track` completes repository sources and then falls back to filesystem target completion. Path arguments such as `dotty add <tab>`, `dotty init <tab>`, `dotty track <selector> <tab>`, and `--repo <tab>` keep filesystem completion.
 
 Example local installs:
 
@@ -196,13 +208,13 @@ dotty completion fish > ~/.config/fish/completions/dotty.fish
 
 ### Repository Selection
 
-Dotty resolves the Dotfiles Repository in this order:
+Dotty resolves the repository in this order:
 
 1. The `--repo` command flag.
 2. The `DOTTY_REPO` environment variable.
 3. `~/.config/dotty/config.toml`, or `$XDG_CONFIG_HOME/dotty/config.toml` when `XDG_CONFIG_HOME` is set.
 
-`dotty init <path>` records the Default Repository in the user config file.
+`dotty init <path>` records the default repository in the user config file. Because `init` is the command that records the default repository, it does not accept `--repo`.
 
 ## Development
 
