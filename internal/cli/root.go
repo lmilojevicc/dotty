@@ -146,7 +146,7 @@ func (a *app) trackCommand() *cobra.Command {
 		Use:               "track <selector> [target...]",
 		Short:             "Add Manifest Link Mappings for an existing Package Source",
 		Args:              cobra.MinimumNArgs(1),
-		ValidArgsFunction: cobra.NoFileCompletions,
+		ValidArgsFunction: a.completeTrackArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -172,7 +172,7 @@ func (a *app) trackCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")
 	cmd.Flags().StringArrayVar(&targets, "target", nil, "Target Path to track (can be repeated)")
-	mustRegisterFlagCompletion(cmd, "target", completeDirectories)
+	mustRegisterFlagCompletion(cmd, "target", completeFilesystemPaths)
 	return cmd
 }
 
@@ -183,7 +183,7 @@ func (a *app) untrackCommand() *cobra.Command {
 		Use:               "untrack <selector> [target...]",
 		Short:             "Remove Manifest Link Mappings without changing files",
 		Args:              cobra.MinimumNArgs(1),
-		ValidArgsFunction: cobra.NoFileCompletions,
+		ValidArgsFunction: a.completeUntrackArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -224,7 +224,7 @@ func (a *app) linkCommand() *cobra.Command {
 		Use:               "link <package>... | --all | --collection <collection>",
 		Short:             "Create links for packages, all packages, or an explicit collection",
 		Args:              selectionArgs(&collections, &all),
-		ValidArgsFunction: a.completePackages,
+		ValidArgsFunction: a.completeLinkArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -281,7 +281,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 		Use:               "unlink <package>... | --all | --collection <collection>",
 		Short:             "Remove links for packages, all packages, or an explicit collection",
 		Args:              selectionArgs(&collections, &all),
-		ValidArgsFunction: a.completePackages,
+		ValidArgsFunction: a.completeUnlinkArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -334,7 +334,7 @@ func (a *app) statusCommand() *cobra.Command {
 		Use:               "status [<package>...]",
 		Short:             "Show linked, unlinked, conflict, missing-source, empty, partial, and untracked states",
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: a.completePackages,
+		ValidArgsFunction: a.completeManifestAndRepoSelectors,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
@@ -376,7 +376,7 @@ func (a *app) listCommand() *cobra.Command {
 		Use:               "list [<package>]",
 		Short:             "List packages and collections defined in the manifest",
 		Args:              maximumArgs(1),
-		ValidArgsFunction: a.completePackages,
+		ValidArgsFunction: a.completeListArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := a.service()
 			if err != nil {
