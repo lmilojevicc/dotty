@@ -87,6 +87,43 @@ links = [
 	requireFileContent(t, target, "target remains untouched\n")
 }
 
+func TestUnlinkUntrackCommandRemovesMappingAndLink(t *testing.T) {
+	home, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+]
+`)
+	source := filepath.Join(repo, "scripts", "docx2pdf")
+	writeTextFile(t, source, "#!/bin/sh\n")
+	target := filepath.Join(home, ".local", "bin", "docx2pdf")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, target); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, err := executeCommand("--repo", repo, "unlink", "scripts/docx2pdf", "--untrack")
+	if err != nil {
+		t.Fatalf("unlink --untrack failed: %v\nstderr: %s", err, errOut)
+	}
+
+	if out != "unlinked scripts: ~/.local/bin/docx2pdf (link removed)\n" {
+		t.Fatalf("unexpected unlink --untrack output: %q", out)
+	}
+	if _, err := os.Lstat(target); err == nil || !os.IsNotExist(err) {
+		t.Fatalf("target still exists after unlink --untrack: %v", err)
+	}
+	requireFileContent(t, dotty.ManifestPath(repo), `version = 1
+
+[packages.scripts]
+links = []
+`)
+}
+
 func TestUntrackCommandRemovesMappingAndWarnsWhenLinkStillExists(t *testing.T) {
 	home, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1

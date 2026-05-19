@@ -8,10 +8,12 @@ import (
 
 type UnlinkOptions struct {
 	Packages    []string
+	Selectors   []Selector
 	Collections []string
 	Targets     []string
 	All         bool
 	LeaveCopy   bool
+	Untrack     bool
 	DryRun      bool
 }
 
@@ -36,7 +38,8 @@ type unlinkAction struct {
 type unlinkTargetState int
 
 const (
-	unlinkTargetAbsent  unlinkTargetState = iota // nothing at target, no-op
+	unlinkTargetAbsent  unlinkTargetState = iota // nothing at target, no-op unless leaving a copy
+	unlinkTargetSkipped                          // unexpected target intentionally left untouched
 	unlinkTargetCorrect                          // target is expected dotty link
 )
 
@@ -51,12 +54,20 @@ func (s Service) Unlink(options UnlinkOptions) ([]UnlinkResult, error) {
 		return s.unlinkResults(plan, true), nil
 	}
 	if err := withRepositoryLock(s.Repo, func() error {
-		var err error
-		plan, err = s.planUnlink(options)
-		if err != nil {
-			return err
-		}
 		return RunAtomic(func(tx *Tx) error {
+			manifest, err := LoadManifest(s.Repo, s.Env)
+			if err != nil {
+				return err
+			}
+			plan, err = s.planUnlinkWithManifest(manifest, options)
+			if err != nil {
+				return err
+			}
+			if options.Untrack {
+				if err := SaveManifest(tx, s.Repo, manifest, s.Env); err != nil {
+					return err
+				}
+			}
 			for i := range plan.actions {
 				if err := s.executeUnlinkAction(tx, &plan.actions[i]); err != nil {
 					return err
@@ -89,6 +100,9 @@ func (s Service) unlinkResults(plan *unlinkPlan, dryRun bool) []UnlinkResult {
 }
 
 func unlinkResultAction(state unlinkTargetState, leaveCopy bool) string {
+	if state == unlinkTargetSkipped {
+		return UnlinkResultActionNoop
+	}
 	if state == unlinkTargetAbsent {
 		if leaveCopy {
 			return UnlinkResultActionCopySource
@@ -106,21 +120,26 @@ func (s Service) planUnlink(options UnlinkOptions) (*unlinkPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	selected, err := ResolveSelectedLinkMappings(
-		manifest,
-		options.Packages,
-		options.Collections,
-		options.All,
-		options.Targets,
-		s.Env,
-	)
+	return s.planUnlinkWithManifest(manifest, options)
+}
+
+func (s Service) planUnlinkWithManifest(
+	manifest *Manifest,
+	options UnlinkOptions,
+) (*unlinkPlan, error) {
+	selected, err := s.resolveUnlinkSelections(manifest, options)
 	if err != nil {
 		return nil, err
 	}
 
 	plan := &unlinkPlan{}
 	for _, mapping := range selected {
-		action, err := s.classifyUnlinkAction(mapping.Package, mapping.Link, options.LeaveCopy)
+		action, err := s.classifyUnlinkAction(
+			mapping.Package,
+			mapping.Link,
+			options.LeaveCopy,
+			options.Untrack,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -129,10 +148,72 @@ func (s Service) planUnlink(options UnlinkOptions) (*unlinkPlan, error) {
 	return plan, nil
 }
 
+func (s Service) resolveUnlinkSelections(
+	manifest *Manifest,
+	options UnlinkOptions,
+) ([]SelectedLinkMapping, error) {
+	if options.Untrack {
+		return s.resolveUntrackedUnlinkSelections(manifest, options)
+	}
+	if len(options.Selectors) > 0 {
+		return ResolveSelectors(manifest, ResolveOptions{
+			Selectors: options.Selectors,
+			Targets:   options.Targets,
+		}, s.Env)
+	}
+	return ResolveSelectedLinkMappings(
+		manifest,
+		options.Packages,
+		options.Collections,
+		options.All,
+		options.Targets,
+		s.Env,
+	)
+}
+
+func (s Service) resolveUntrackedUnlinkSelections(
+	manifest *Manifest,
+	options UnlinkOptions,
+) ([]SelectedLinkMapping, error) {
+	if options.All {
+		return nil, fmt.Errorf("--untrack cannot be combined with --all")
+	}
+	if len(options.Collections) > 0 {
+		return nil, fmt.Errorf("--untrack cannot be combined with --collection")
+	}
+	selectors := append([]Selector{}, options.Selectors...)
+	for _, packageName := range options.Packages {
+		selectors = append(selectors, Selector{Package: packageName})
+	}
+	if len(selectors) != 1 {
+		return nil, fmt.Errorf("--untrack accepts exactly one selector")
+	}
+	untracked, err := s.planUntrack(manifest, UntrackOptions{
+		Selector: selectors[0],
+		Targets:  options.Targets,
+		DryRun:   options.DryRun,
+	})
+	if err != nil {
+		return nil, err
+	}
+	selected := make([]SelectedLinkMapping, 0, len(untracked))
+	for _, item := range untracked {
+		selected = append(selected, SelectedLinkMapping{
+			Package: item.Package,
+			Link: LinkMapping{
+				Source: item.Source,
+				Target: item.Target,
+			},
+		})
+	}
+	return selected, nil
+}
+
 func (s Service) classifyUnlinkAction(
 	packageName string,
 	mapping LinkMapping,
 	leaveCopy bool,
+	allowUnexpectedTarget bool,
 ) (unlinkAction, error) {
 	action := unlinkAction{packageName: packageName, mapping: mapping, leaveCopy: leaveCopy}
 
@@ -218,12 +299,20 @@ func (s Service) classifyUnlinkAction(
 	}
 
 	if info.Mode()&os.ModeSymlink == 0 {
+		if allowUnexpectedTarget {
+			action.state = unlinkTargetSkipped
+			return action, nil
+		}
 		return action, fmt.Errorf(
 			"target %s is not an expected dotty link (inspect with `dotty status` or remove it manually)",
 			targetAbs,
 		)
 	}
 	if !symlinkPointsTo(targetAbs, sourceAbs) {
+		if allowUnexpectedTarget {
+			action.state = unlinkTargetSkipped
+			return action, nil
+		}
 		targetText, _ := os.Readlink(targetAbs)
 		return action, fmt.Errorf(
 			"target %s is a symlink to another source %s (restore the expected Link or remove it manually)",
@@ -252,6 +341,9 @@ func unlinkCopySourcePath(sourceAbs string) (string, error) {
 }
 
 func (s Service) executeUnlinkAction(tx *Tx, action *unlinkAction) error {
+	if action.state == unlinkTargetSkipped {
+		return nil
+	}
 	if action.state == unlinkTargetAbsent {
 		if action.leaveCopy {
 			return CopyPathTx(tx, action.copySourceAbs, action.targetAbs)

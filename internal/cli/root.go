@@ -334,6 +334,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 	var targets []string
 	var all bool
 	var leaveCopy bool
+	var untrack bool
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:               "unlink <package>... | --all | --collection <collection>",
@@ -345,16 +346,26 @@ func (a *app) unlinkCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			unlinked, err := svc.Unlink(
-				dotty.UnlinkOptions{
-					Packages:    args,
-					Collections: collections,
-					Targets:     targets,
-					All:         all,
-					LeaveCopy:   leaveCopy,
-					DryRun:      dryRun,
-				},
-			)
+			options := dotty.UnlinkOptions{
+				Collections: collections,
+				Targets:     targets,
+				All:         all,
+				LeaveCopy:   leaveCopy,
+				Untrack:     untrack,
+				DryRun:      dryRun,
+			}
+			if untrack {
+				for _, arg := range args {
+					selector, err := dotty.ParseSelector(arg)
+					if err != nil {
+						return err
+					}
+					options.Selectors = append(options.Selectors, selector)
+				}
+			} else {
+				options.Packages = args
+			}
+			unlinked, err := svc.Unlink(options)
 			if err != nil {
 				return err
 			}
@@ -368,6 +379,7 @@ func (a *app) unlinkCommand() *cobra.Command {
 	mustRegisterFlagCompletion(cmd, "collection", a.completeCollections)
 	cmd.Flags().
 		BoolVar(&leaveCopy, "leave-copy", false, "replace expected links with target-side copies")
+	cmd.Flags().BoolVar(&untrack, "untrack", false, "remove selected Link Mappings after unlinking")
 	cmd.Flags().StringArrayVar(&targets, "target", nil, "Target Path to unlink (can be repeated)")
 	mustRegisterFlagCompletion(cmd, "target", a.completeTargets)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing files")

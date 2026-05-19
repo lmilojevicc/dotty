@@ -1950,6 +1950,197 @@ packages = ["tmux", "scripts"]
 	assertSymlink(t, filepath.Join(home, ".config", "tmux"), filepath.Join(repo, "tmux"))
 }
 
+func TestUnlinkUntrackSourceRemovesLinkAndMapping(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+  { source = "sesh-fzf", target = "~/.local/bin/sesh-fzf" },
+]
+`)
+	docxSource := filepath.Join(repo, "scripts", "docx2pdf")
+	writeTextFile(t, docxSource, "docx2pdf\n")
+	writeTextFile(t, filepath.Join(repo, "scripts", "sesh-fzf"), "sesh\n")
+	docxTarget := filepath.Join(home, ".local", "bin", "docx2pdf")
+	requireNoError(t, os.MkdirAll(filepath.Dir(docxTarget), 0o755))
+	requireNoError(t, os.Symlink(docxSource, docxTarget))
+
+	_, err := NewService(repo, env).Unlink(UnlinkOptions{
+		Selectors: []Selector{mustParseSelector(t, "scripts/docx2pdf")},
+		Untrack:   true,
+	})
+
+	requireNoError(t, err)
+	requireNoPath(t, docxTarget)
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.scripts]
+links = [
+  { source = "sesh-fzf", target = "~/.local/bin/sesh-fzf" },
+]
+`)
+}
+
+func TestUnlinkUntrackPackageSelectorRemovesAllMappingsAndLeavesEmptyPackage(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+]
+`)
+	source := filepath.Join(repo, "scripts", "docx2pdf")
+	writeTextFile(t, source, "docx2pdf\n")
+	target := filepath.Join(home, ".local", "bin", "docx2pdf")
+	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+	requireNoError(t, os.Symlink(source, target))
+
+	_, err := NewService(repo, env).Unlink(UnlinkOptions{
+		Selectors: []Selector{mustParseSelector(t, "scripts")},
+		Untrack:   true,
+	})
+
+	requireNoError(t, err)
+	requireNoPath(t, target)
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.scripts]
+links = []
+`)
+}
+
+func TestUnlinkUntrackOnlySelectedTarget(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/.local/bin/docx2pdf" },
+  { source = "docx2pdf", target = "~/bin/docx2pdf" },
+]
+`)
+	source := filepath.Join(repo, "scripts", "docx2pdf")
+	writeTextFile(t, source, "docx2pdf\n")
+	target := filepath.Join(home, ".local", "bin", "docx2pdf")
+	requireNoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+	requireNoError(t, os.Symlink(source, target))
+
+	_, err := NewService(repo, env).Unlink(UnlinkOptions{
+		Selectors: []Selector{mustParseSelector(t, "scripts/docx2pdf")},
+		Targets:   []string{"~/.local/bin/docx2pdf"},
+		Untrack:   true,
+	})
+
+	requireNoError(t, err)
+	requireNoPath(t, target)
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.scripts]
+links = [
+  { source = "docx2pdf", target = "~/bin/docx2pdf" },
+]
+`)
+}
+
+func TestUnlinkUntrackRejectsInvalidSelectionCombinations(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, "version = 1\n")
+
+	tests := []struct {
+		name    string
+		options UnlinkOptions
+		wantErr string
+	}{
+		{
+			name: "multiple selectors",
+			options: UnlinkOptions{
+				Selectors: []Selector{
+					mustParseSelector(t, "scripts/a"),
+					mustParseSelector(t, "scripts/b"),
+				},
+				Untrack: true,
+			},
+			wantErr: "--untrack accepts exactly one selector",
+		},
+		{
+			name:    "all",
+			options: UnlinkOptions{All: true, Untrack: true},
+			wantErr: "--untrack cannot be combined with --all",
+		},
+		{
+			name:    "collection",
+			options: UnlinkOptions{Collections: []string{"tools"}, Untrack: true},
+			wantErr: "--untrack cannot be combined with --collection",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewService(repo, env).Unlink(tt.options)
+			requireErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestUnlinkUntrackRemovesMappingWhenTargetAbsentOrNotDottyLink(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.scripts]
+links = [
+  { source = "absent", target = "~/.local/bin/absent" },
+  { source = "conflict", target = "~/.local/bin/conflict" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "scripts", "absent"), "absent\n")
+	writeTextFile(t, filepath.Join(repo, "scripts", "conflict"), "conflict\n")
+	conflictTarget := filepath.Join(home, ".local", "bin", "conflict")
+	writeTextFile(t, conflictTarget, "local conflict\n")
+
+	results, err := NewService(repo, env).Unlink(UnlinkOptions{
+		Selectors: []Selector{mustParseSelector(t, "scripts/absent")},
+		Untrack:   true,
+	})
+	requireNoError(t, err)
+	if len(results) != 1 || results[0].Action != UnlinkResultActionNoop {
+		t.Fatalf("unexpected absent untrack results: %#v", results)
+	}
+
+	_, err = NewService(repo, env).Unlink(UnlinkOptions{
+		Selectors: []Selector{mustParseSelector(t, "scripts/conflict")},
+		Untrack:   true,
+	})
+	requireNoError(t, err)
+	requireFileContent(t, conflictTarget, "local conflict\n")
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.scripts]
+links = []
+`)
+}
+
+func TestLeaveCopyUnlinkUntrackEjectsMappingAndLeavesCopy(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
+	source := filepath.Join(repo, "zsh", ".zshrc")
+	writeTextFile(t, source, "export EDITOR=vim\n")
+	target := filepath.Join(home, ".zshrc")
+	requireNoError(t, os.Symlink(source, target))
+
+	_, err := NewService(repo, env).Unlink(UnlinkOptions{
+		Selectors: []Selector{mustParseSelector(t, "zsh/.zshrc")},
+		LeaveCopy: true,
+		Untrack:   true,
+	})
+
+	requireNoError(t, err)
+	requireFileContent(t, target, "export EDITOR=vim\n")
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.zsh]
+links = []
+`)
+}
+
 func TestUnlinkHandlesAbsentTargetsAndDefaultUnlinkWithoutSource(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	svc := NewService(repo, env)

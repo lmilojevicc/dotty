@@ -565,7 +565,14 @@ func TestCommandSurfaceInventory(t *testing.T) {
 			name:  "unlink",
 			use:   "unlink <package>... | --all | --collection <collection>",
 			short: "Remove links for packages, all packages, or an explicit collection",
-			flags: []string{"all:", "collection:c", "dry-run:", "leave-copy:", "target:"},
+			flags: []string{
+				"all:",
+				"collection:c",
+				"dry-run:",
+				"leave-copy:",
+				"target:",
+				"untrack:",
+			},
 		},
 		{
 			name:  "status",
