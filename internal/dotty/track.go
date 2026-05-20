@@ -101,14 +101,6 @@ func (s Service) planTrack(manifest *Manifest, options TrackOptions) ([]TrackRes
 		if err := AddManifestLink(manifest, options.Selector.Package, link, s.Env); err != nil {
 			return nil, err
 		}
-		if err := validateLinkMappingTopology(
-			s.Repo,
-			options.Selector.Package,
-			link,
-			s.Env,
-		); err != nil {
-			return nil, err
-		}
 		results = append(results, TrackResult{
 			Package: options.Selector.Package,
 			Source:  source,

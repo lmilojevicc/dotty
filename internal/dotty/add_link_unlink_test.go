@@ -1832,6 +1832,31 @@ links = [
 `)
 }
 
+func TestLinkTrackRejectsSymlinkedTargetParentAndLeavesManifestUnchanged(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	manifest := "version = 1\n"
+	writeDottyManifest(t, repo, manifest)
+	writeTextFile(t, filepath.Join(repo, "app", "config"), "managed config\n")
+
+	externalConfig := filepath.Join(filepath.Dir(home), "external-config")
+	requireNoError(t, os.MkdirAll(externalConfig, 0o755))
+	configLink := filepath.Join(home, ".config")
+	requireNoError(t, os.Remove(configLink))
+	requireNoError(t, os.Symlink(externalConfig, configLink))
+
+	_, err := NewService(repo, env).Link(LinkOptions{
+		Selectors: []Selector{mustParseSelector(t, "app/config")},
+		Targets:   []string{"~/.config/config"},
+		Track:     true,
+	})
+
+	requireErrorContains(t, err, "symlinked parent")
+	requireFileContent(t, ManifestPath(repo), manifest)
+	assertSymlink(t, configLink, externalConfig)
+	requireNoPath(t, filepath.Join(externalConfig, "config"))
+}
+
 func TestLinkTrackRejectsInvalidSelectionCombinations(t *testing.T) {
 	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")

@@ -1,6 +1,7 @@
 package dotty
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -99,6 +100,36 @@ func TestTrackPackageSelectorTracksPackageRoot(t *testing.T) {
 [packages.tmux]
 links = [
   { source = ".", target = "~/.config/tmux" },
+]
+`)
+}
+
+func TestTrackAllowsSymlinkedTargetParentWithoutTouchingTarget(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, "version = 1\n")
+	writeTextFile(t, filepath.Join(repo, "app", "config"), "managed config\n")
+
+	externalConfig := filepath.Join(filepath.Dir(home), "external-config")
+	requireNoError(t, os.MkdirAll(externalConfig, 0o755))
+	configLink := filepath.Join(home, ".config")
+	requireNoError(t, os.Remove(configLink))
+	requireNoError(t, os.Symlink(externalConfig, configLink))
+
+	results, err := NewService(repo, env).Track(TrackOptions{
+		Selector: mustParseSelector(t, "app/config"),
+		Targets:  []string{"~/.config/config"},
+	})
+
+	requireNoError(t, err)
+	requireTrackResults(t, results, []string{"app:config:~/.config/config"})
+	assertSymlink(t, configLink, externalConfig)
+	requireNoPath(t, filepath.Join(externalConfig, "config"))
+	requireFileContent(t, ManifestPath(repo), `version = 1
+
+[packages.app]
+links = [
+  { source = "config", target = "~/.config/config" },
 ]
 `)
 }
