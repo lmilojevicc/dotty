@@ -121,7 +121,7 @@ func (a *app) completeLinkArgs(
 	if len(args) == 0 && toComplete == "" {
 		return a.completeManifestAndRepoPackages(cmd, toComplete)
 	}
-	return a.completeManifestAndRepoSelectors(cmd, args, toComplete)
+	return a.completeManifestAndRepoSelectorsForPrefix(cmd, args, toComplete)
 }
 
 func (a *app) completeUnlinkArgs(
@@ -136,7 +136,7 @@ func (a *app) completeUnlinkArgs(
 	if len(args) == 0 && toComplete == "" {
 		return a.completeManifestAndRepoPackages(cmd, toComplete)
 	}
-	return a.completeManifestAndRepoSelectors(cmd, args, toComplete)
+	return a.completeManifestAndRepoSelectorsForPrefix(cmd, args, toComplete)
 }
 
 func (a *app) completeTrackArgs(
@@ -221,6 +221,20 @@ func (a *app) completeManifestAndRepoSelectors(
 		selectedCompletions(args),
 		toComplete,
 	), cobra.ShellCompDirectiveNoFileComp
+}
+
+func (a *app) completeManifestAndRepoSelectorsForPrefix(
+	cmd *cobra.Command,
+	args []string,
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	if all, err := cmd.Flags().GetBool("all"); err == nil && all {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	if strings.Contains(toComplete, "/") {
+		return a.completeManifestAndRepoSelectors(cmd, args, toComplete)
+	}
+	return a.completeManifestSelectors(args, toComplete)
 }
 
 func (a *app) completeManifestAndRepoPackages(

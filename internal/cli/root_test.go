@@ -1622,6 +1622,87 @@ links = [
 	}
 }
 
+func TestLinkAndUnlinkCompletionAfterPackageDoesNotOfferRepoOnlySources(t *testing.T) {
+	_, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+	writeTextFile(t, filepath.Join(repo, "zsh", ".zprofile"), "export PATH\n")
+
+	for _, command := range []string{"link", "unlink"} {
+		t.Run(command, func(t *testing.T) {
+			choices, errOut, err := executeCompletion("--repo", repo, command, "tmux", "")
+			if err != nil {
+				t.Fatalf("%s completion failed: %v\nstderr: %s", command, err, errOut)
+			}
+			requireChoices(t, choices, []string{"zsh", "zsh/.zshrc"})
+		})
+	}
+}
+
+func TestLinkAndUnlinkCompletionWithAllSuppressesSelectors(t *testing.T) {
+	_, repo := setupCLITest(t)
+	writeManifest(t, repo, `version = 1
+
+[packages.tmux]
+links = [
+  { source = ".", target = "~/.config/tmux" },
+]
+
+[packages.zsh]
+links = [
+  { source = ".zshrc", target = "~/.zshrc" },
+]
+`)
+
+	for _, command := range []string{"link", "unlink"} {
+		t.Run(command+" prefix", func(t *testing.T) {
+			choices, directive, errOut, err := executeCompletionResult(
+				"--repo", repo, command, "--all", "z",
+			)
+			if err != nil {
+				t.Fatalf("%s --all prefix completion failed: %v\nstderr: %s", command, err, errOut)
+			}
+			requireChoices(t, choices, nil)
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Fatalf(
+					"%s --all prefix directive mismatch: want %d, got %d",
+					command,
+					cobra.ShellCompDirectiveNoFileComp,
+					directive,
+				)
+			}
+		})
+
+		t.Run(command+" after package", func(t *testing.T) {
+			choices, directive, errOut, err := executeCompletionResult(
+				"--repo", repo, command, "--all", "tmux", "",
+			)
+			if err != nil {
+				t.Fatalf("%s --all package completion failed: %v\nstderr: %s", command, err, errOut)
+			}
+			requireChoices(t, choices, nil)
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Fatalf(
+					"%s --all package directive mismatch: want %d, got %d",
+					command,
+					cobra.ShellCompDirectiveNoFileComp,
+					directive,
+				)
+			}
+		})
+	}
+}
+
 func TestCollectionFlagCompletesManifestCollections(t *testing.T) {
 	_, repo := setupCLITest(t)
 	writeManifest(t, repo, `version = 1
