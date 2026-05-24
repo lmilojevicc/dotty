@@ -16,6 +16,17 @@ func pathExists(path string) (bool, error) {
 	return false, err
 }
 
+func sourcePathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
 func symlinkPointsTo(path, expectedAbs string) bool {
 	target, err := os.Readlink(path)
 	if err != nil {

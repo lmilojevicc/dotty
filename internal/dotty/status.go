@@ -261,7 +261,10 @@ func (s Service) entryStatus(
 		entry.State = StateConflict
 		return entry
 	}
-	if exists, err := pathExists(sourceAbs); err != nil || !exists {
+	if exists, err := sourcePathExists(sourceAbs); err != nil {
+		entry.State = StateConflict
+		return entry
+	} else if !exists {
 		entry.State = StateMissingSource
 		return entry
 	}

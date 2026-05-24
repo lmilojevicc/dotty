@@ -155,7 +155,7 @@ func resolvedSourceStaysWithinPackage(repo, root, source string) bool {
 	}
 	sourceResolved, err := filepath.EvalSymlinks(existingSource)
 	if err != nil {
-		return false
+		return os.IsNotExist(err)
 	}
 	return isWithin(rootResolved, sourceResolved)
 }

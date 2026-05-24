@@ -288,6 +288,69 @@ func TestStatusReportsEscapingPackageSourceSymlinkAsConflict(t *testing.T) {
 	}
 }
 
+func TestStatusReportsDanglingPackageSourceSymlinkAsMissingSource(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.ghost]
+links = [
+  { source = "config", target = "~/.config/ghost" },
+]
+`)
+	packageRoot := filepath.Join(repo, "ghost")
+	requireNoError(t, os.MkdirAll(packageRoot, 0o755))
+	requireNoError(t, os.Symlink("missing-config", filepath.Join(packageRoot, "config")))
+
+	report, err := NewService(repo, env).Status([]string{"ghost"})
+	requireNoError(t, err)
+	if len(report.Packages) != 1 {
+		t.Fatalf("expected one package status, got %d", len(report.Packages))
+	}
+	if got := report.Packages[0].State; got != StateMissingSource {
+		t.Fatalf("dangling Package Source symlink should report MISSING SOURCE, got %s", got)
+	}
+	if len(report.Packages[0].Entries) != 1 ||
+		report.Packages[0].Entries[0].State != StateMissingSource {
+		t.Fatalf(
+			"dangling Package Source symlink entry should report MISSING SOURCE, got %#v",
+			report.Packages[0].Entries,
+		)
+	}
+}
+
+func TestStatusReportsPackageSourceSymlinkLoopAsConflict(t *testing.T) {
+	home, env := setupHome(t)
+	repo := filepath.Join(home, "dotfiles")
+	writeDottyManifest(t, repo, `version = 1
+
+[packages.ghost]
+links = [
+  { source = "config", target = "~/.config/ghost" },
+]
+`)
+	packageRoot := filepath.Join(repo, "ghost")
+	requireNoError(t, os.MkdirAll(packageRoot, 0o755))
+	requireNoError(t, os.Symlink("config-other", filepath.Join(packageRoot, "config")))
+	requireNoError(t, os.Symlink("config", filepath.Join(packageRoot, "config-other")))
+
+	report, err := NewService(repo, env).Status([]string{"ghost"})
+	requireNoError(t, err)
+	if len(report.Packages) != 1 {
+		t.Fatalf("expected one package status, got %d", len(report.Packages))
+	}
+	if got := report.Packages[0].State; got != StateConflict {
+		t.Fatalf("Package Source symlink loop should report CONFLICT, got %s", got)
+	}
+	if len(report.Packages[0].Entries) != 1 ||
+		report.Packages[0].Entries[0].State != StateConflict {
+		t.Fatalf(
+			"Package Source symlink loop entry should report CONFLICT, got %#v",
+			report.Packages[0].Entries,
+		)
+	}
+}
+
 func TestStatusReportsUnsupportedSpecialFilePackageSourceAsConflict(t *testing.T) {
 	home, env := setupHome(t)
 	repo := filepath.Join(home, "dotfiles")

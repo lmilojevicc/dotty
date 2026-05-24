@@ -1155,6 +1155,42 @@ links = [
 	}
 }
 
+func TestLinkReportsDanglingPackageSourceSymlinkAsMissingSource(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.ghost]
+links = [
+  { source = "config", target = "~/.config/ghost" },
+]
+`)
+	packageRoot := filepath.Join(repo, "ghost")
+	requireNoError(t, os.MkdirAll(packageRoot, 0o755))
+	requireNoError(t, os.Symlink("missing-config", filepath.Join(packageRoot, "config")))
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"ghost"}})
+	requireErrorContains(t, err, "ghost/config is missing from the repository")
+	requireNoPath(t, filepath.Join(home, ".config", "ghost"))
+}
+
+func TestLinkRejectsPackageSourceSymlinkEscapingPackageRoot(t *testing.T) {
+	home, repo, env := setupLinkedPackageTest(t, `version = 1
+
+[packages.ghost]
+links = [
+  { source = "config", target = "~/.config/ghost" },
+]
+`)
+	external := filepath.Join(home, "external", "ghost-config")
+	writeTextFile(t, external, "external config\n")
+	packageRoot := filepath.Join(repo, "ghost")
+	requireNoError(t, os.MkdirAll(packageRoot, 0o755))
+	requireNoError(t, os.Symlink(external, filepath.Join(packageRoot, "config")))
+
+	_, err := NewService(repo, env).Link(LinkOptions{Packages: []string{"ghost"}})
+	requireErrorContains(t, err, "escapes package")
+	requireNoPath(t, filepath.Join(home, ".config", "ghost"))
+}
+
 func TestLinkRefusesTargetConflictUnlessForced(t *testing.T) {
 	home, repo, env := setupLinkedPackageTest(t, manifestWithSingleZshrcLink)
 	writeTextFile(t, filepath.Join(repo, "zsh", ".zshrc"), "export EDITOR=vim\n")

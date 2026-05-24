@@ -244,7 +244,7 @@ func (s Service) classifyLinkAction(
 		return action, err
 	}
 
-	if exists, err := pathExists(sourceAbs); err != nil {
+	if exists, err := sourcePathExists(sourceAbs); err != nil {
 		return action, err
 	} else if !exists {
 		return action, fmt.Errorf(
