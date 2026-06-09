@@ -80,7 +80,7 @@ func (s Service) planTrack(manifest *Manifest, options TrackOptions) ([]TrackRes
 		return nil, fmt.Errorf(
 			"%s is missing from the repository (create it first, or use `dotty add <target> %s` to adopt target-side content)",
 			selectorLabel(options.Selector.Package, source),
-			selectorLabel(options.Selector.Package, source),
+			options.Selector.Package,
 		)
 	}
 	if err := validateSupportedSourcePath(sourceAbs); err != nil {

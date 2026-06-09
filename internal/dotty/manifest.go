@@ -69,11 +69,9 @@ func ValidateManifest(manifest *Manifest, env Env) error {
 			key := filepath.Clean(targetAbs)
 			if prev, ok := targets[key]; ok {
 				return fmt.Errorf(
-					"%s is already mapped to %s (run `dotty untrack %s --target %s` first)",
+					"%s is already mapped to %s (remove one duplicate mapping from the manifest)",
 					link.Target,
 					selectorLabel(name, prev),
-					selectorLabel(name, prev),
-					link.Target,
 				)
 			}
 			for existingTarget, existingSource := range targets {
@@ -163,7 +161,25 @@ func AddManifestLink(manifest *Manifest, packageName string, link LinkMapping, e
 			manifest.Packages[packageName] = pkg
 			return nil
 		}
-		if existing.Target == link.Target {
+	}
+
+	if err := validateTargetPath(link.Target); err != nil {
+		return err
+	}
+	linkTarget, err := ExpandTargetPath(link.Target, env)
+	if err != nil {
+		return err
+	}
+	linkTarget = filepath.Clean(linkTarget)
+	for _, existing := range pkg.Links {
+		if err := validateTargetPath(existing.Target); err != nil {
+			return err
+		}
+		existingTarget, err := ExpandTargetPath(existing.Target, env)
+		if err != nil {
+			return err
+		}
+		if filepath.Clean(existingTarget) == linkTarget {
 			return fmt.Errorf(
 				"%s is already mapped to %s (run `dotty untrack %s --target %s` first)",
 				link.Target,

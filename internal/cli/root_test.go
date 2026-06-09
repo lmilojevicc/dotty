@@ -3058,10 +3058,22 @@ packages = ["zsh"]
 					"hint: use --force --dry-run to preview replacing it\n",
 			},
 			{
+				name: "add repository source conflict",
+				args: []string{"--repo", repo, "add", conflictTarget, "zsh"},
+				want: "error: zsh/.zshrc already has tracked content\n" +
+					"hint: choose another source path\n",
+			},
+			{
 				name: "missing source",
 				args: []string{"--repo", repo, "link", "tmux"},
 				want: "error: tmux is missing from the repository\n" +
 					"hint: restore it, or run `dotty untrack tmux` to remove the manifest entry\n",
+			},
+			{
+				name: "track missing source add hint uses package",
+				args: []string{"--repo", repo, "track", "scripts/missing", "~/.local/bin/missing"},
+				want: "error: scripts/missing is missing from the repository\n" +
+					"hint: create it first, or use `dotty add <target> scripts` to adopt target-side content\n",
 			},
 			{
 				name: "missing add target",

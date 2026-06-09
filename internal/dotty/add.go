@@ -204,7 +204,7 @@ func (s Service) planAdd(
 	if destExists {
 		if !sameExistingPath(dest, adoptPath) {
 			return nil, fmt.Errorf(
-				"%s already has tracked content (use --force to replace it, or choose another source path)",
+				"%s already has tracked content (choose another source path)",
 				selectorLabel(packageName, filepath.ToSlash(sourceRel)),
 			)
 		}

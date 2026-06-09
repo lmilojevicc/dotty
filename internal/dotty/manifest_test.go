@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -251,11 +252,17 @@ func TestValidateManifestDuplicateTargetErrorIncludesActionableHint(t *testing.T
 
 	err := ValidateManifest(manifest, env)
 	requireErrorContains(t, err, "is already mapped")
-	requireErrorContains(t, err, "dotty untrack")
+	requireErrorContains(t, err, "remove one duplicate mapping from the manifest")
+	if strings.Contains(err.Error(), "dotty untrack") {
+		t.Fatalf(
+			"expected duplicate manifest validation error not to suggest dotty untrack, got %q",
+			err.Error(),
+		)
+	}
 }
 
 func TestAddManifestLinkCreatesDedupesAndRejectsTargetReuse(t *testing.T) {
-	_, env := setupHome(t)
+	home, env := setupHome(t)
 	manifest := NewManifest()
 	link := LinkMapping{Source: ".zshrc", Target: "~/.zshrc"}
 
@@ -276,6 +283,14 @@ func TestAddManifestLinkCreatesDedupesAndRejectsTargetReuse(t *testing.T) {
 		AddManifestLink(manifest, "zsh", LinkMapping{Source: ".zshenv", Target: "~/.zshrc"}, env),
 		"dotty untrack",
 	)
+	semanticDuplicateErr := AddManifestLink(
+		manifest,
+		"zsh",
+		LinkMapping{Source: ".zprofile", Target: filepath.Join(home, ".zshrc")},
+		env,
+	)
+	requireErrorContains(t, semanticDuplicateErr, "is already mapped")
+	requireErrorContains(t, semanticDuplicateErr, "dotty untrack")
 }
 
 func TestFormatManifestSortsPackagesAndCollections(t *testing.T) {
