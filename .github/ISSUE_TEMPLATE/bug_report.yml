@@ -1,0 +1,64 @@
+name: Bug report
+description: Report something in Dotty that is not working as expected
+title: "[bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in the details
+        below. The more reproducible your report, the faster it can be fixed.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug and the expected behavior.
+      placeholder: I ran `dotty ...` and expected X, but got Y instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Dotty version
+      description: Output of `dotty --version` or the installed commit.
+      placeholder: "e.g. 0.1.0 or commit SHA"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands and a minimal setup that triggers the bug.
+      placeholder: |
+        1. Run `dotty init ...`
+        2. Run `dotty add ...`
+        3. ...
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and output
+      description: Relevant command output or errors. Paste between the backticks.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add anything else that helps. Redact secrets and personal paths.
+    validations:
+      required: false
