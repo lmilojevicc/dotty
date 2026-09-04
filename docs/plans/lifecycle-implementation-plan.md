@@ -2,7 +2,7 @@
 
 ## Status and authority
 
-**Status:** Milestone 0 accepted for substantive documentation baseline `7eaec6c`; this follow-up records acceptance only. Milestones 1–7 remain planned.
+**Status:** Milestone 0 remains accepted for substantive documentation baseline `7eaec6c`. Milestone 1 is In progress: only its FIRST focused-test harness prerequisite is accepted at `2669cac5cd51bf8a20f30dd61258506c97fd096f` ([receipt](#milestone-1-first-focused-test-harness-acceptance-receipt)); full Milestone 1 is not accepted. Strict TOML persistence and all runtime integrity/command slices are not started. Milestones 2–7 remain planned. This update records status/evidence only.
 
 [CONTEXT.md](../../CONTEXT.md) is the sole normative user-visible product contract in this working tree. This roadmap owns only delivery order, compatibility notes, acceptance gates, and evidence links; it does not define runtime semantics. Fresh acceptance of this baseline's Milestone 0 commit gates every source milestone.
 
@@ -124,7 +124,7 @@ Provide safe shared primitives and migrate every existing mutating caller before
 1. **Focused-test harness only:** make `mise run test:focused` fail when the full requested selection executes zero non-skipped tests, including a requested subtest that does not exist even though its parent runs. Report the matched, non-skipped executed test names, preserve package/pattern and supported argument forwarding without reinterpretation, and propagate underlying command/test failures. Define positive, zero-match, subtest-mismatch, argument-preservation, and error-propagation regressions before implementation. Use the full `mise run verify` gate rather than trusting the harness to certify itself. This slice changes only the focused-check path and its tests; it does not begin runtime migration.
 2. **Strict TOML persistence:** after the harness slice is independently reviewed and verified, implement C9 strict Manifest/config decoding and TOML-compatible scalar encoding, with regression coverage for unknown nested fields, malformed scalars, and round trips. Preserve existing rewrite modes; this slice does not claim completion of the later anchored persistence migration. Run `mise run verify` and `mise run vuln` for this persistence slice before proceeding.
 
-Both slices remain planned. Record their accepted commits and fresh evidence before continuing with the remaining foundation work; neither slice alone passes Milestone 1.
+The FIRST focused-test harness prerequisite alone is accepted ([receipt](#milestone-1-first-focused-test-harness-acceptance-receipt)); strict TOML persistence and all runtime integrity/command slices are not started. Strict TOML is the next bounded slice and requires separate implementation, independent review, `mise run verify`, and `mise run vuln`; this receipt neither authorizes nor starts it. Record its accepted commit and fresh evidence before continuing with the remaining foundation work; neither slice alone passes Milestone 1.
 
 ### Implementation slice
 
@@ -466,7 +466,7 @@ Update Status during execution. Populate Evidence only after the acceptance gate
 | Milestone | Status | Evidence |
 | --- | --- | --- |
 | 0. Governance and normative contracts | Accepted (documentation only) | [Receipt](#milestone-0-acceptance-receipt) |
-| 1. Persistence/filesystem foundations | Planned; focused-test harness first, then strict TOML persistence | — |
+| 1. Persistence/filesystem foundations | In progress; FIRST focused-test harness prerequisite accepted only; strict TOML and all runtime integrity/command slices not started | [Bounded receipt](#milestone-1-first-focused-test-harness-acceptance-receipt); full M1 and Linux/native filesystem gates pending |
 | 2. Planning, diagnostics, confirmation | Planned | — |
 | 3. Deterministic Add and Init dry-run | Planned | — |
 | 4. Remove | Planned | — |
@@ -481,6 +481,15 @@ Update Status during execution. Populate Evidence only after the acceptance gate
 - Parent verification `proc_e7df` at that baseline: `env MISE_GO_VERSION=1.26.6 GOTOOLCHAIN=local mise run verify` SUCCEEDED, exit 0 after 5s; fmt:check, lint, vet, tests, and build passed. No lifecycle runtime or native-platform evidence is claimed.
 - Provenance only: earlier oracle `0883364b` was BLOCKED; its two wording defects were corrected in `7eaec6c`. `proc_0a3d` passed before those edits; `proc_aae2` failed lint with default Homebrew Go 1.27.1 versus linter build Go 1.26.2. Mise does not pin Go; the passing override was process-local, not a repaired vanilla environment.
 - Only the first focused-test harness slice is authorized; independent review and full `mise run verify` must pass before strict TOML persistence. Neither slice nor Milestone 1 is accepted here.
+
+### Milestone 1 FIRST focused-test harness acceptance receipt
+
+- Accepted scope: FIRST focused-test harness prerequisite only, substantive commit `2669cac5cd51bf8a20f30dd61258506c97fd096f`; code is unchanged since the passing checks below. Runtime lifecycle commands are unchanged. This is not full Milestone 1 acceptance.
+- Review sequence: fresh full-source reviewer `e23aa3fb9a954af6b462e3f3066e02f6` initially returned structural PASS, but runtime tests then exposed a build-cancellation regression; that initial review alone did not accept the slice. Final narrow independent reviewer `37a091b0-1d21-40b6-839f-9b788c9c964b` returned PASS on the evidence-based Bash 3.2 fix, resolving the old runtime blocker structurally.
+- Parent `proc_ecc7` SUCCEEDED, exit 0 after 94s, using `/private/tmp/dotty-checks.SwvUbuw3/launch` for `fmt` → `diagnostic` → `verify`. Actual tasks: `mise run fmt`, `mise run test:focused ./internal/tools/focused 'TestFocusedCancellation/wrapper_build|TestFocusedTaskProtocol/completion'`, and `mise run verify`. The diagnostic explicitly passed INT/TERM build cancellation and completion tests. Required fmt:check, lint (0 issues), vet, all tests, and build passed; full focused-package tests took 70.285s.
+- Parent `proc_aa73` ran `launch vuln` (`mise run vuln`): SUCCEEDED, exit 0 after 5s. No reachable/code/imported-package vulnerabilities were found. The scanner also reported one advisory at the required-module level, with no affected imported packages or reachable calls identified; this is not a claim of zero advisories globally.
+- All final checks used an `env -i` allowlist with private HOME, XDG, DOTTY_REPO, TMPDIR, Go and mise state/cache, installed Go 1.26.6, `GOTOOLCHAIN=local`, and PATH excluding installed Dotty. Launcher review `b70b6cd8` returned PASS before the fixed vuln-only action was added. This protects against accidental live Dotty resolution; it is not a filesystem sandbox. The private launcher and artifacts are retained locally, not committed or claimed portable. Earlier pre-clean-environment failures are diagnostic history, not current acceptance evidence.
+- Boundaries: native execution evidence is current Darwin with `/bin/bash` 3.2, not Linux. Linux and full native filesystem gates remain pending. Go remains unpinned in mise; clean-environment process selection is a workaround, not a toolchain configuration fix. Milestone 0 remains accepted at `7eaec6c`; strict TOML and all runtime integrity/command slices are not started; Milestones 2–7 remain planned. The next bounded strict TOML slice requires separate implementation/review/verify/vuln and is neither authorized nor started by this receipt.
 
 ## Completion definition
 
