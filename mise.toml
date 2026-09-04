@@ -40,7 +40,9 @@ usage = '''
 arg "<package>" help="Go package path to test, e.g. ./internal/cli"
 arg "<pattern>" help="Test name or regular expression for go test -run"
 '''
-run = 'go test "${usage_package:?}" -run "${usage_pattern:?}"'
+run = '''
+exec bash ./internal/tools/focused/task.sh "${usage_package:?}" "${usage_pattern:?}"
+'''
 
 [tasks.build]
 description = "Build the dotty CLI"
