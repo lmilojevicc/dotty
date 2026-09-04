@@ -4,6 +4,8 @@ Dotty manages personal configuration files by storing them in a dotfiles reposit
 
 ## Lifecycle delivery status
 
+Milestone 0 documentation baseline `7eaec6c` is accepted; see the [acceptance receipt](docs/plans/lifecycle-implementation-plan.md#milestone-0-acceptance-receipt). Milestones 1–7 remain planned; no lifecycle implementation is claimed.
+
 This document is Dotty's sole normative terminology and user-visible product contract. The lifecycle changes below—including integrity guarantees, strict decoding, deterministic Add, Remove, Prune, bounded Force Add, destructive confirmation, and Init dry-run—record previously approved target behavior, not claims that the current implementation already provides it. [ADRs](docs/adr/) own architectural mechanisms and rationale only; the [lifecycle implementation plan](docs/plans/lifecycle-implementation-plan.md) owns delivery order, acceptance gates, and evidence for this baseline. Current-baseline acceptance is tracked in that plan; historical review and implementation evidence does not transfer. `README.md` and CLI help describe only shipped behavior.
 
 ## Language

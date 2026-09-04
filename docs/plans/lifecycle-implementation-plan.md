@@ -2,7 +2,7 @@
 
 ## Status and authority
 
-**Status:** Milestone 0 documentation is reconciled for the baseline based on `e747d37`, pending fresh oracle consultation, independent review, and verification. Milestones 1–7 are planned; no lifecycle implementation or verification evidence is imported from the earlier worktree.
+**Status:** Milestone 0 accepted for substantive documentation baseline `7eaec6c`; this follow-up records acceptance only. Milestones 1–7 remain planned.
 
 [CONTEXT.md](../../CONTEXT.md) is the sole normative user-visible product contract in this working tree. This roadmap owns only delivery order, compatibility notes, acceptance gates, and evidence links; it does not define runtime semantics. Fresh acceptance of this baseline's Milestone 0 commit gates every source milestone.
 
@@ -465,7 +465,7 @@ Update Status during execution. Populate Evidence only after the acceptance gate
 
 | Milestone | Status | Evidence |
 | --- | --- | --- |
-| 0. Governance and normative contracts | Reconciled; pending fresh oracle/review/verification | — |
+| 0. Governance and normative contracts | Accepted (documentation only) | [Receipt](#milestone-0-acceptance-receipt) |
 | 1. Persistence/filesystem foundations | Planned; focused-test harness first, then strict TOML persistence | — |
 | 2. Planning, diagnostics, confirmation | Planned | — |
 | 3. Deterministic Add and Init dry-run | Planned | — |
@@ -474,6 +474,13 @@ Update Status during execution. Populate Evidence only after the acceptance gate
 | 6A. Force Add exact sources | Planned | — |
 | 6B. Force Add directories/root | Planned | — |
 | 7. Empty Collection warnings/UX audit | Planned | — |
+
+### Milestone 0 acceptance receipt
+
+- Reviewed baseline: `7eaec6c4e1f54e39fa2b8ef87494a0512bff964f`. Independent oracle `1f7115f7-f38c-4667-a636-688462a3aaca` reviewed the full baseline: READY, no documentation blocker.
+- Parent verification `proc_e7df` at that baseline: `env MISE_GO_VERSION=1.26.6 GOTOOLCHAIN=local mise run verify` SUCCEEDED, exit 0 after 5s; fmt:check, lint, vet, tests, and build passed. No lifecycle runtime or native-platform evidence is claimed.
+- Provenance only: earlier oracle `0883364b` was BLOCKED; its two wording defects were corrected in `7eaec6c`. `proc_0a3d` passed before those edits; `proc_aae2` failed lint with default Homebrew Go 1.27.1 versus linter build Go 1.26.2. Mise does not pin Go; the passing override was process-local, not a repaired vanilla environment.
+- Only the first focused-test harness slice is authorized; independent review and full `mise run verify` must pass before strict TOML persistence. Neither slice nor Milestone 1 is accepted here.
 
 ## Completion definition
 
