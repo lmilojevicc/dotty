@@ -15,9 +15,10 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-// notifyWrapperReady is the task wrapper's private fd-3 acknowledgment. It is
-// emitted only after signal subscription, before starting any owned work. Close
-// the descriptor and remove the marker so Go/test descendants do not inherit it.
+// notifyWrapperReady sends readiness only after signal subscription, then waits
+// for the wrapper's ACK before any separately grouped child can start. Without
+// that barrier a damaged readiness read could strand work during wrapper abort.
+// Close both private descriptors and remove the marker before starting children.
 func notifyWrapperReady() error {
 	if os.Getenv("DOTTY_FOCUSED_WRAPPER") != "1" {
 		return nil
@@ -31,7 +32,29 @@ func notifyWrapperReady() error {
 	}
 	_, err := ready.WriteString("RUNNER_READY\n")
 	closeErr := ready.Close()
-	return errors.Join(err, closeErr)
+	if err := errors.Join(err, closeErr); err != nil {
+		return err
+	}
+	return awaitWrapperAck()
+}
+
+func awaitWrapperAck() error {
+	control := os.NewFile(4, "focused-wrapper-control")
+	if control == nil {
+		return errors.New("invalid focused wrapper control descriptor")
+	}
+	// Read exactly one frame, without buffering RELEASE for the anchor. The
+	// anchor does not read control again until this runner has exited.
+	var ack [4]byte
+	_, err := io.ReadFull(control, ack[:])
+	closeErr := control.Close()
+	if err := errors.Join(err, closeErr); err != nil {
+		return err
+	}
+	if string(ack[:]) != "ACK\n" {
+		return fmt.Errorf("invalid focused wrapper acknowledgment %q", ack[:])
+	}
+	return nil
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
@@ -76,6 +99,17 @@ func execute(cmd *exec.Cmd, pattern string, stdout, stderr io.Writer) int {
 	if err := notifyWrapperReady(); err != nil {
 		fmt.Fprintln(stderr, "focused: wrapper readiness:", err)
 		return 1
+	}
+	// A cancellation forwarded between READY and ACK is already subscribed.
+	// Do not launch child work for a cancellation queued during that handshake.
+	select {
+	case sig := <-signals:
+		fmt.Fprintln(stderr, "focused: cancelled before child startup")
+		if sig == os.Interrupt {
+			return 130
+		}
+		return 143 // cancellationSignals subscribes only INT and TERM.
+	default:
 	}
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {

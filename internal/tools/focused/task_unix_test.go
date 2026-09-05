@@ -40,6 +40,27 @@ func TestFocusedTaskProtocol(t *testing.T) {
 		{name: "transition TERM", boundary: "transition", signal: syscall.SIGTERM, want: 143, forward: true},
 		{name: "startup INT", boundary: "startup", signal: syscall.SIGINT, want: 130, forward: true},
 		{name: "startup TERM", boundary: "startup", signal: syscall.SIGTERM, want: 143, forward: true},
+		{name: "partial readiness", boundary: "partial readiness", want: 0},
+		{name: "truncated readiness", boundary: "truncated readiness", want: 1, forward: true},
+		{name: "invalid readiness", boundary: "invalid readiness", want: 1, forward: true},
+		{name: "truncated readiness INT", boundary: "truncated readiness", signal: syscall.SIGINT, want: 130, forward: true},
+		{name: "invalid readiness TERM", boundary: "invalid readiness", signal: syscall.SIGTERM, want: 143, forward: true},
+		{name: "unterminated readiness INT", boundary: "unterminated readiness", signal: syscall.SIGINT, want: 130, forward: true},
+		{name: "unterminated readiness TERM", boundary: "unterminated readiness", signal: syscall.SIGTERM, want: 143, forward: true},
+		{name: "ack transition INT", boundary: "ack transition", signal: syscall.SIGINT, want: 130, forward: true},
+		{name: "ack transition TERM", boundary: "ack transition", signal: syscall.SIGTERM, want: 143, forward: true},
+		{name: "ack write INT", boundary: "ack write", signal: syscall.SIGINT, want: 130, forward: true},
+		{name: "ack write TERM", boundary: "ack write", signal: syscall.SIGTERM, want: 143, forward: true},
+		{name: "ack write failure", boundary: "ack write failure", want: 1, forward: true},
+		{name: "delivered ack failure", boundary: "delivered ack failure", want: 1, forward: true},
+		{name: "invalid ack", boundary: "invalid ack", want: 9},
+		{name: "ack EOF", boundary: "ack EOF", want: 9},
+		{name: "partial ack EOF", boundary: "partial ack EOF", want: 9},
+		{name: "partial ack open INT", boundary: "partial ack open", signal: syscall.SIGINT, want: 130, forward: true},
+		{name: "partial ack open TERM", boundary: "partial ack open", signal: syscall.SIGTERM, want: 143, forward: true},
+		{name: "short invalid ack open INT", boundary: "short invalid ack open", signal: syscall.SIGINT, want: 130, forward: true},
+		{name: "short invalid ack open TERM", boundary: "short invalid ack open", signal: syscall.SIGTERM, want: 143, forward: true},
+		{name: "early runner exit", boundary: "early runner exit", want: 7},
 		{name: "partial readiness INT", boundary: "partial readiness", signal: syscall.SIGINT, want: 130, forward: true},
 		{name: "partial readiness TERM", boundary: "partial readiness", signal: syscall.SIGTERM, want: 143, forward: true},
 		{name: "completion INT", boundary: "completion", signal: syscall.SIGINT, status: 7, want: 130, forward: true},
@@ -88,6 +109,8 @@ protocol_gate() {
 				seam = "exec 4> \"$tmp/control\""
 			case "transition":
 				seam = "stage=startup"
+			case "ack transition":
+				seam = "stage=runner"
 			case "completion":
 				seam = "code=${message#RUNNER_DONE }"
 			case "finished":
@@ -99,8 +122,70 @@ protocol_gate() {
 				}
 				text = strings.Replace(text, seam, seam+"\nprotocol_gate", 1)
 			}
+			// Inject a malformed read result, not a timing-dependent Bash fault.
+			// READY corruption was observed in an instrumented fixture; its
+			// cause is unproven. Robustness must cover any malformed frame.
+			// Gate after the bad frame has been read so cancellation cannot race
+			// ahead of the reproduction. The unterminated case instead signals
+			// a real read with an incomplete record still on the wire.
+			badReady := tc.boundary == "truncated readiness" || tc.boundary == "invalid readiness"
+			if badReady && tc.signal != 0 {
+				seam := "case \"$message\" in"
+				if strings.Count(text, seam) != 1 {
+					t.Fatal("missing status dispatch seam")
+				}
+				text = strings.Replace(text, seam,
+					"if [ \"$stage\" = startup ]; then protocol_gate; fi\n  "+seam, 1)
+			}
+			openAck := tc.boundary == "partial ack open" || tc.boundary == "short invalid ack open"
+			if openAck {
+				// Pause on the NEXT status read, after the ACK write seam has
+				// returned success and all post-write bookkeeping has completed.
+				// Keep control open: only cancellation can wake the ACK reader.
+				seam := "read_status() {\n  local part read_code"
+				if strings.Count(text, seam) != 1 {
+					t.Fatal("missing status read seam")
+				}
+				text = strings.Replace(text, seam,
+					seam+"\n  if [ \"$stage\" = runner ]; then protocol_gate; fi", 1)
+			}
+			badAck := tc.boundary == "invalid ack" || tc.boundary == "ack EOF" ||
+				tc.boundary == "partial ack EOF" || openAck
+			ackFailure := tc.boundary == "ack write failure" ||
+				tc.boundary == "delivered ack failure"
+			if tc.boundary == "ack write" || badAck || ackFailure {
+				seam := "printf 'ACK\\n' >&4"
+				if strings.Count(text, seam) != 1 {
+					t.Fatal("missing ACK write seam")
+				}
+				replacement := "protocol_gate\n      " + seam
+				switch tc.boundary {
+				case "ack write failure":
+					replacement = "false"
+				case "delivered ack failure":
+					replacement = "{ " + seam + "; false; }"
+				case "invalid ack":
+					replacement = "printf 'BAD\\n' >&4"
+				case "ack EOF":
+					replacement = "exec 4>&-"
+				case "partial ack EOF":
+					replacement = "printf 'AC' >&4; exec 4>&-"
+				case "partial ack open":
+					replacement = "printf 'AC' >&4"
+				case "short invalid ack open":
+					replacement = "printf 'A\\n' >&4"
+				}
+				text = strings.Replace(text, seam, replacement, 1)
+			}
 			wrapper := focusedTaskTrace(t, root, text)
 			fakeGo := `#!/bin/bash
+if [ "$1" = test ]; then
+  printf '%s\n' started > "$FOCUSED_PROTOCOL_ROOT/work-started"
+  export DOTTY_FOCUSED_CANCEL_ROOT="$FOCUSED_PROTOCOL_ROOT"
+  export DOTTY_FOCUSED_CANCEL_FIXTURE=child
+  export DOTTY_FOCUSED_CANCEL_BEHAVIOR='retained pipe'
+  exec "$FOCUSED_PROTOCOL_BINARY" -test.run='^TestFocusedCancellationProcessFixture$'
+fi
 [ "$1" = build ] || exit 9
 [ "$FOCUSED_PROTOCOL_BOUNDARY" = 'build failure' ] && exit 7
 printf '%s\n' '#!/bin/bash' 'exec "$FOCUSED_PROTOCOL_BINARY" -test.run="^TestFocusedTaskProtocolFixture$"' > "$3"
@@ -137,6 +222,12 @@ chmod 700 "$3"
 			done := make(chan error, 1)
 			go func() { done <- cmd.Wait() }()
 			t.Cleanup(func() { _ = cmd.Process.Kill() })
+			if tc.signal == 0 && tc.boundary == "partial readiness" {
+				waitProtocolFile(t, filepath.Join(root, "boundary"))
+				if _, err := gate.WriteString("continue\n"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if tc.signal != 0 {
 				waitProtocolFile(t, filepath.Join(root, "boundary"))
 				if tc.boundary == "completion" || tc.boundary == "finished" {
@@ -202,12 +293,74 @@ chmod 700 "$3"
 			if err != nil || len(artifacts) != 0 {
 				t.Errorf("cleanup before return: %v, %v", artifacts, err)
 			}
+			preAckCancel := tc.signal != 0 && (tc.boundary == "startup" ||
+				tc.boundary == "transition" || tc.boundary == "partial readiness" ||
+				tc.boundary == "ack transition" || tc.boundary == "unterminated readiness")
+			if badReady || badAck || preAckCancel || tc.boundary == "ack write" ||
+				tc.boundary == "ack write failure" {
+				if _, err := os.Stat(
+					filepath.Join(root, "work-started"),
+				); !errors.Is(
+					err,
+					os.ErrNotExist,
+				) {
+					t.Errorf("work launched without startup acknowledgment: %v", err)
+				}
+			}
+			if tc.boundary == "" || (tc.boundary == "partial readiness" && tc.signal == 0) {
+				if _, err := os.Stat(filepath.Join(root, "work-started")); err != nil {
+					t.Errorf("valid acknowledged startup did not run: %v", err)
+				}
+			}
+			if badReady || preAckCancel {
+				trace, err := os.ReadFile(filepath.Join(root, "wrapper-trace"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(string(trace), "+focused: printf 'ACK\\n'") {
+					t.Error("acknowledged failed/cancelled startup")
+				}
+			}
+			if openAck {
+				trace, err := os.ReadFile(filepath.Join(root, "wrapper-trace"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(string(trace), "invalid focused wrapper acknowledgment") {
+					t.Errorf("missing malformed ACK diagnostic: %s", trace)
+				}
+			}
+			if badReady || openAck || tc.boundary == "unterminated readiness" ||
+				(tc.boundary == "partial readiness" && tc.signal != 0) {
+				// Readiness fixtures start an outer-group descendant; open-ACK
+				// fixtures could start one only through acknowledged child work.
+				// Wait beyond its write, not just wrapper exit.
+				time.Sleep(2200 * time.Millisecond)
+				if _, err := os.Stat(
+					filepath.Join(root, "sentinel"),
+				); !errors.Is(
+					err,
+					os.ErrNotExist,
+				) {
+					t.Errorf("descendant activity after startup abort: %v", err)
+				}
+			}
 			logged, err := os.ReadFile(filepath.Join(root, "signals"))
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				t.Fatal(err)
 			}
 			if tc.forward && len(logged) == 0 {
 				t.Fatal("expected owned-group forwarding")
+			}
+			if badReady || preAckCancel {
+				if !strings.Contains(string(logged), "-TERM -- -") ||
+					!strings.Contains(string(logged), "-KILL -- -") {
+					t.Errorf("startup abort did not escalate TERM/KILL: %s", logged)
+				}
+			}
+			if (tc.boundary == "ack write" || ackFailure || openAck) &&
+				strings.Contains(string(logged), "-KILL -- -") {
+				t.Errorf("outer group escalated after ACK could be sent: %s", logged)
 			}
 			anchor, err := os.ReadFile(filepath.Join(root, "anchor"))
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -296,6 +449,10 @@ func TestFocusedTaskProtocolFixture(_ *testing.T) {
 
 func runFocusedTaskProtocolFixture(root string) int {
 	boundary := os.Getenv("FOCUSED_PROTOCOL_BOUNDARY")
+	if boundary == "partial ack open" || boundary == "short invalid ack open" {
+		// Exercise the real handshake and child-start barrier, not a replica.
+		return run([]string{"./fixture", "TestPlain"}, os.Stdout, os.Stderr)
+	}
 	if boundary == "startup failure" {
 		return 7
 	}
@@ -319,22 +476,79 @@ func runFocusedTaskProtocolFixture(root string) int {
 	}
 	signals, stop := cancellationSignals()
 	defer stop()
-	if boundary == "partial readiness" {
+	badReady := boundary == "truncated readiness" || boundary == "invalid readiness" ||
+		boundary == "unterminated readiness"
+	if badReady || boundary == "partial readiness" {
+		child := exec.Command(os.Args[0], "-test.run=^TestFocusedCancellationProcessFixture$")
+		child.Env = append(os.Environ(),
+			"DOTTY_FOCUSED_CANCEL_FIXTURE=descendant", "DOTTY_FOCUSED_CANCEL_ROOT="+root,
+			"DOTTY_FOCUSED_CANCEL_BEHAVIOR=retained pipe")
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			return 9
+		}
+		defer func() { _ = child.Wait() }()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			if _, err := os.Stat(filepath.Join(root, "ready")); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				return 9
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if boundary == "partial readiness" || badReady || boundary == "early runner exit" {
 		ready := os.NewFile(3, "focused-wrapper-status")
-		if _, err := ready.WriteString("RUNNER_"); err != nil {
-			return 9
-		}
-		if err := gate(); err != nil {
-			return 9
-		}
-		if _, err := ready.WriteString("READY\n"); err != nil {
-			return 9
+		switch boundary {
+		case "partial readiness":
+			if _, err := ready.WriteString("RUNNER_"); err != nil {
+				return 9
+			}
+			if err := gate(); err != nil {
+				return 9
+			}
+			if _, err := ready.WriteString("READY\n"); err != nil {
+				return 9
+			}
+		case "truncated readiness":
+			if _, err := ready.WriteString("RUNNER_READ\n"); err != nil {
+				return 9
+			}
+		case "invalid readiness":
+			if _, err := ready.WriteString("INVALID\n"); err != nil {
+				return 9
+			}
+		case "unterminated readiness":
+			if _, err := ready.WriteString("RUNNER_"); err != nil {
+				return 9
+			}
+			if err := gate(); err != nil {
+				return 9
+			}
+		case "early runner exit":
+			if _, err := ready.WriteString("RUNNER_READY\n"); err != nil {
+				return 9
+			}
+			return 7
 		}
 		if err := ready.Close(); err != nil {
 			return 9
 		}
+		if err := awaitWrapperAck(); err != nil {
+			return 9
+		}
 	} else if err := notifyWrapperReady(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		return 9
+	}
+	select {
+	case sig := <-signals:
+		return 128 + int(sig.(syscall.Signal))
+	default:
+	}
+	if err := os.WriteFile(filepath.Join(root, "work-started"), nil, 0o600); err != nil {
 		return 9
 	}
 	if boundary == "signal exit" {
@@ -343,7 +557,7 @@ func runFocusedTaskProtocolFixture(root string) int {
 		time.Sleep(5 * time.Second)
 		return 9
 	}
-	if boundary == "startup" || boundary == "transition" || boundary == "partial readiness" {
+	if boundary == "startup" || boundary == "transition" || boundary == "ack transition" {
 		sig := <-signals
 		return 128 + int(sig.(syscall.Signal))
 	}
