@@ -6,7 +6,13 @@ import (
 	"strings"
 )
 
+// RenderError preserves the rendering-only API. Entrypoints must use
+// RenderExecutionError to also honor the exit status of a typed report.
 func RenderError(out io.Writer, err error) {
+	RenderExecutionError(out, err)
+}
+
+func renderLegacyError(out io.Writer, err error) {
 	if err == nil {
 		return
 	}
