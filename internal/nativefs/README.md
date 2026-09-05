@@ -60,6 +60,25 @@ mise run verify
 mise run vuln
 ```
 
+`TestUnsupportedBuildTargets` runs in ordinary `mise run test` / `mise run verify`
+on Go compiler host platforms (not Android, iOS, or WebAssembly). It uses the host
+Go driver resolved from trusted `PATH` to an absolute path to compile this package's
+tests for FreeBSD/amd64 and Windows/amd64, requires nonempty regular artifacts under
+private `t.TempDir` paths, and never executes them. Each compilation has a two-minute
+context timeout and a five-second output-drain wait. Combined stdout/stderr capture
+is capped at 64 KiB; further bytes are drained and discarded, with an explicit
+truncation notice and discarded-byte count in failure diagnostics. Failures retain
+the compiler error, context state, and captured output; artifact failures also
+include captured output. Go config/workspace/toolchain switching, inherited flags,
+and `GOCACHEPROG` helpers are disabled before any Go subprocess, as are cgo and
+network module lookup. `GOCACHE`, `GOMODCACHE`, and `GOPATH` are always overwritten
+with private test-owned paths, never reused from the parent or linked to host data;
+HOME/config/repository and compiler temporary paths are also isolated. Unsupported
+stubs and common tests use only the standard library; any unexpected dependency
+requiring network access fails rather than enabling a network fallback. Small
+helper regressions cover output truncation/draining and inherited-environment
+overrides. These compile-only safeguards leave the 40-case native inventory intact.
+
 Both native Darwin and native Linux runs must record every required case and
 OS/architecture/revision provenance. Unsupported cross-builds are compile-only,
 not native acceptance evidence. Full verification, vulnerability checks, and fresh
