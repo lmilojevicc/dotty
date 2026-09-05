@@ -49,6 +49,9 @@ func FuzzFormatManifestRoundTrip(f *testing.F) {
 		{source: ".", target: "~/.config/tmux"},
 		{source: ".zshrc", target: "~/.zshrc"},
 		{source: "quoted\"source", target: "~/quoted\"target"},
+		{source: "controls\x00\a\v\x1f\x7f", target: "~/\t\b\f\r\n"},
+		{source: "é漢字😀�", target: "~/é漢字😀�"},
+		{source: "backslash\\", target: "~/backslash\\"},
 	} {
 		f.Add(seed.source, seed.target)
 	}

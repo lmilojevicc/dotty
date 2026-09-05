@@ -3,8 +3,6 @@ package dotty
 import (
 	"fmt"
 	"os"
-
-	"github.com/pelletier/go-toml/v2"
 )
 
 func LoadConfig(env Env) (*Config, error) {
@@ -17,7 +15,7 @@ func LoadConfig(env Env) (*Config, error) {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 	var cfg Config
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	if err := decodeTOML(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 	return &cfg, nil
@@ -25,9 +23,12 @@ func LoadConfig(env Env) (*Config, error) {
 
 func SaveConfig(tx *Tx, env Env, cfg *Config) error {
 	path := env.ConfigFilePath()
-	if err := EnsureDirTx(tx, dirOf(path), 0o755); err != nil {
+	if err := validateTOMLString("config repo", cfg.Repo); err != nil {
+		return fmt.Errorf("save config %s: %w", path, err)
+	}
+	if _, err := LoadConfig(env); err != nil {
 		return err
 	}
-	data := []byte(fmt.Sprintf("repo = %q\n", cfg.Repo))
+	data := []byte("repo = " + tomlBasicString(cfg.Repo) + "\n")
 	return WriteFileTx(tx, path, data, 0o644)
 }
