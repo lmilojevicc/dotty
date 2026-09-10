@@ -27,9 +27,15 @@ API:
   Both require an exact-0700 private parent and native lock-file authority.
 - `(*File).Close() error` closes its independent read-only descriptor once and
   releases its retained parent lease, even on error. Copies share lifetime.
-- `(*Dir).Close() error` blocks new leases, waits for active operations **and
-  dependent Files**, and closes every owned descriptor once. Close dependent
-  Files before waiting for parent Close. Copies share that lifetime.
+- `(*Dir).LockFile(context.Context, Component) (*Lease, error)` locks a fresh
+  existing-only read-only File; `LockDirectory(context.Context) (*Lease, error)`
+  locks an independently repinned repository directory. Neither creates content.
+- `(*Lease).Release() error` attempts unlock and close once, joins path-wrapped
+  failures, and drops retained ancestry even on error. Copies share lifetime.
+- `(*Dir).Close() error` signals pending acquisition cancellation, blocks new
+  acquisition/publication, then waits for active operations, dependent Files,
+  **and returned file/directory Leases** before closing descriptors once. Release
+  Leases and close Files before awaiting parent Close. Copies share lifetime.
 
 Identity means device/inode/kind, not content, metadata, a durable snapshot, or
 atomic inode comparison-and-swap. Private leases protect descriptor lifetime
@@ -94,8 +100,9 @@ overrides. These compile-only safeguards leave the 40-case native inventory inta
 Both native Darwin and native Linux runs must record every required case and
 OS/architecture/revision provenance. Unsupported cross-builds are compile-only,
 not native acceptance evidence. Full verification, vulnerability checks, and fresh
-independent review remain required. The 31b candidate adds private create/open primitives only, not canonical user
-coordination, a transaction runner, caller migration, fidelity, or artifact authority.
+independent review remain required. The private create/open and planned 31c flock
+primitives do not select canonical user coordination, implement a transaction
+runner, migrate callers, or supply fidelity or artifact authority.
 User-lock adversarial fixtures must never use the real OS-user lock anchor.
 
 ## Authority observations — 31a
@@ -138,7 +145,7 @@ require effective UID and no group/other write or special bits. System ancestors
 require root/effective UID ownership and no group/other write or special bits;
 `/` requires root, and only the fixed platform temporary root permits root-owned
 01777. System ancestors are validation-only, never flock targets. The private create/open
-operations below use these policies internally; no flock, canonical coordinator,
+and flock operations below use these policies internally; no canonical coordinator
 or production integration is included.
 
 The [slice contract](../../docs/plans/coordination-authority-slice.md) owns serial
@@ -180,8 +187,8 @@ objects are never chmodded, repaired, truncated or removed. File flags are fixed
 `O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK|O_NOCTTY`, with `O_CREAT|O_EXCL` and
 requested 0600 only for creation. Type is observed before an existing file open,
 then FD/name/full ancestry are rebound and authority is observed repeatedly.
-These flags do not eliminate every device-open race. Future 31c must natively
-verify read-only local flock support; 31b implies none.
+These flags do not eliminate every device-open race. The planned 31c native
+process gates must verify read-only local flock support; 31b implies none.
 
 Only an exclusively created, bound FD with native supported security, effective
 UID, regular type, one link, and only umask-reduced 0600 bits may establish 0600
@@ -238,3 +245,41 @@ Run whole required aggregators, not selected children. Preserve the 40 native,
 Darwin/no-cgo and foreign-target results are capability/compile limits only, not
 native acceptance. Release configuration and the Darwin production blocker remain
 unchanged.
+
+## File/directory flock — planned 31c, production-unused
+
+Each acquisition owns a new open file description, never a dup or the caller's
+shared directory FD. File acquisition uses existing-only 31b open and retains
+its original parent token. An immutable final File authority observation carries
+its strict baseline into flock setup; File.Close semantics are unchanged.
+Directory acquisition independently repins every original ancestry identity and
+transfers its original operation token through Release.
+
+Fresh guarded baselines survive opening/repinning and waiting. Full physical and
+production security ancestry, leaf policy, and every identity/UID/GID/mode/ACL/
+mount/nlink fact are compared before waiting and after acquisition. No creation
+nlink exception applies. Selected `/` and the fixed temporary root refuse even
+for UID 0; only the selected leaf is flocked.
+
+`LOCK_EX|LOCK_NB` retries EINTR and waits on a context/Close-aware timer for
+EWOULDBLOCK/EAGAIN. Unsupported errors refuse. Publication and Close share the
+lifecycle mutex, without holding it through syscalls or blocking waits. Context
+is checked immediately before publication; later cancellation does not revoke a
+returned Lease. A losing publication race unlocks, closes and drops all tokens
+once. Errors remain primitive evidence, never C4 or unchanged-state claims.
+
+`TestFlockBoundary` defines the exact 15 slice-contract roots, with file/directory
+variants and nested drift, failure, publication, and release regressions. Those
+implementations, subprocess helper and initial unavailable/API assertions preceded
+production edits; the final-observation cancellation regression was added during
+source inspection. Source ordering is not a red-run claim. Real processes use bounded ready/go/
+contended/acquired/release/released pipe handshakes, native read-only descriptors,
+validated private fixture identities and native root authority before the test
+security adapter. Contention proof is an observed native error, never a sleep.
+Full physical guards still cover ancestors above the private security boundary.
+
+The implementation worker ran no commands or checks. Independent review, parent
+formatting, clean `mise run verify`/`mise run vuln`, both native OS inventories,
+and unavailable/foreign-build limits remain required. Read-only flock support
+is **unproven until those real-process cases execute**. Prior inventories and
+Darwin's production cgo blocker remain unchanged; no 31c acceptance is recorded.

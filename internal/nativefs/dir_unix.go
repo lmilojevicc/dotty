@@ -24,10 +24,11 @@ type dirState struct {
 	closeFD func(int) error
 
 	// All lifecycle fields are guarded by lifecycleMu.
-	active   int
-	closing  bool
-	closed   bool
-	closeErr error
+	active    int
+	closing   bool
+	closed    bool
+	closeErr  error
+	closingCh chan struct{}
 }
 
 // One short critical section acquires both handles atomically. This provides a
@@ -72,8 +73,27 @@ func acquire(dirs ...*Dir) (func(), error) {
 	}, nil
 }
 
-// Close prevents new leases, waits for active operations through their native
-// syscall, then closes each owned descriptor exactly once. Concurrent callers
+// closingSignal also handles test-constructed states. Initialization and Close
+// share lifecycleMu; receivers never wait while holding that mutex.
+func closingSignal(s *dirState) <-chan struct{} {
+	lifecycleMu.Lock()
+	defer lifecycleMu.Unlock()
+	return closingSignalLocked(s)
+}
+
+func closingSignalLocked(s *dirState) chan struct{} {
+	if s.closingCh == nil {
+		s.closingCh = make(chan struct{})
+		if s.closing {
+			close(s.closingCh)
+		}
+	}
+	return s.closingCh
+}
+
+// Close cancels pending flock acquisitions, prevents publication, and waits for
+// active operations and dependent Files/file and directory Leases. Release them
+// before awaiting Close. It closes each owned descriptor once. Concurrent callers
 // and copied wrappers receive the same result. A close error never causes retry:
 // the OS may already have released and reused that descriptor number.
 func (d *Dir) Close() error {
@@ -90,7 +110,9 @@ func (d *Dir) Close() error {
 		lifecycleMu.Unlock()
 		return err
 	}
+	signal := closingSignalLocked(s)
 	s.closing = true
+	close(signal)
 	for s.active != 0 {
 		lifecycleChanged.Wait()
 	}

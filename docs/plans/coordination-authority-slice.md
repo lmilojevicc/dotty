@@ -135,6 +135,37 @@ isolated parent formatting/verification/vulnerability checks, and complete nativ
 inventories remain required. No acceptance, lifecycle receipt, flock/31c,
 coordinator/32, caller, C4, dependency or release-policy change is included.
 
+## 31c implementation preparation — planned, not accepted
+
+The production-unused candidate adds `Dir.LockFile(context.Context, Component)`,
+`Dir.LockDirectory(context.Context)` and opaque shared `Lease.Release() error`.
+Each acquisition owns a fresh existing-only File or independently repinned Dir,
+never a dup/shared description. Strict guarded baselines cross opening/repinning
+and waiting without 31b creation nlink exceptions. Full physical and production
+security ancestry are checked internally, with exact policy/fact drift refusal.
+Selected `/` and the fixed temporary root are validation-only, including UID 0.
+
+Close signals pending cancellation before waiting, serializes with publication,
+and waits for active operations and published file AND directory leases. Callers
+Release before awaiting Close. File.Close is unchanged; its final immutable 31b
+observation carries the leaf baseline into flock setup. File leases retain the
+fresh File's original parent token; directory leases transfer the original
+operation token. Context cancellation after publication does not revoke a lease.
+Unlock and close each run once; failures retain joined path-wrapped causes and
+release tokens without reacquiring a closing parent. No C4 classification occurs.
+
+The exact fifteen `TestFlockBoundary` roots, implementations, native process
+handshake helper, and unavailable/API regressions were defined before production
+edits. Supporting assertions were refined and final-observation cancellation
+coverage added during source inspection. No worker
+commands, red execution, green execution, or native capability proof are claimed.
+Private fixtures retain real native filesystem/ACL evidence and full physical
+guards; the child validates fixture identity and native root authority before
+using the test-only security boundary. Parent-owned independent review, formatting,
+clean verification/vulnerability checks, complete native Darwin/Linux inventories,
+and unavailable/foreign-build limits remain pending. No receipt/status promotion,
+coordinator32, caller, dependency, release-policy or integration change is included.
+
 ### Parent-only validation handoff
 
 The worker must be stopped before parent review/validation. Do not execute checks from an inherited shell or source the launcher. The reviewed launcher is `/Users/milo/Worktrees/dotty/agent-validation/coord-authority-1adkot34/host.sh`; its accepted actions are `preflight`, `fmt` (format **check**, not formatting), `verify`, and `vuln`. Parent must review source and launcher pins first. Native Darwin evidence must explicitly record cgo/compiler configuration rather than infer it from a passing non-cgo build. The existing launcher does not define a separate Linux or Darwin-no-cgo action; those require their own reviewed clean launch configurations, not worker-invented command extensions.

@@ -619,6 +619,7 @@ func (d *Dir) lockFile(
 		state: &fileState{
 			fd:            fd,
 			path:          path,
+			authority:     previous,
 			closeFD:       calls.acquisition.close,
 			releaseParent: release,
 		},

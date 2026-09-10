@@ -14,8 +14,10 @@ type File struct {
 }
 
 type fileState struct {
-	fd            int
-	path          string
+	fd   int
+	path string
+	// Last strictly bound 31b observation; flock preserves it across setup.
+	authority     AuthorityFacts
 	closeFD       func(int) error
 	releaseParent func()
 	once          sync.Once

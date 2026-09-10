@@ -781,7 +781,7 @@ func testNoUnsafeFallback(t *testing.T) {
 }
 
 func testPrivateAPI(t *testing.T) {
-	for _, typ := range []reflect.Type{reflect.TypeFor[Dir](), reflect.TypeFor[Component](), reflect.TypeFor[File](), reflect.TypeFor[CreationRecord](), reflect.TypeFor[CreationObservation]()} {
+	for _, typ := range []reflect.Type{reflect.TypeFor[Dir](), reflect.TypeFor[Component](), reflect.TypeFor[File](), reflect.TypeFor[CreationRecord](), reflect.TypeFor[CreationObservation](), reflect.TypeFor[Lease]()} {
 		for i := range typ.NumField() {
 			field := typ.Field(i)
 			if field.IsExported() {
@@ -793,6 +793,11 @@ func testPrivateAPI(t *testing.T) {
 		"Close": true, "Identity": true, "Observe": true, "Authority": true,
 		"OpenPrivateDir": true, "CreatePrivateDir": true,
 		"OpenLockFile": true, "CreateLockFile": true,
+		"LockFile": true, "LockDirectory": true,
+	}
+	leaseType := reflect.TypeFor[*Lease]()
+	if leaseType.NumMethod() != 1 || leaseType.Method(0).Name != "Release" {
+		t.Fatalf("unexpected Lease API: %v", leaseType)
 	}
 	fileType := reflect.TypeFor[*File]()
 	if fileType.NumMethod() != 1 || fileType.Method(0).Name != "Close" {
