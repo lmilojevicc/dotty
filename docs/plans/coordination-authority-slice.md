@@ -1,6 +1,6 @@
 # Coordination authority — slice 31 implementation/test contract
 
-**NONNORMATIVE · 31a accepted; 31b/31c planned · Production-unused.** This records the accepted scope and limits of oracle `9ab9a37a` and follow-up `71110014`, within the continuing full-plan authorization. The [31a receipt](lifecycle-implementation-plan.md#milestone-1-authority-facts-and-security-readers-31a-acceptance-receipt) accepts exact code `9504a628473d2c2287bf64ce53262e3c727e2dea` with bounded Darwin and Linux evidence. It does not accept 31b/31c, Milestone 1, production integration, or a product-semantics change. [CONTEXT.md](../../CONTEXT.md) owns product semantics; [ADR 0006](../adr/0006-use-a-user-scoped-mutation-lock.md) and [ADR 0007](../adr/0007-use-anchored-filesystem-mutations.md) own coordination and anchored authority. The [lifecycle plan](lifecycle-implementation-plan.md#first-serial-slices) owns delivery order and wider gates.
+**NONNORMATIVE · 31a/31b accepted; 31c planned · Production-unused.** This records the accepted scope and limits of oracle `9ab9a37a` and follow-up `71110014`, within the continuing full-plan authorization. The [31a receipt](lifecycle-implementation-plan.md#milestone-1-authority-facts-and-security-readers-31a-acceptance-receipt) accepts exact code `9504a628473d2c2287bf64ce53262e3c727e2dea` with bounded Darwin and Linux evidence. The separate [31b receipt](lifecycle-implementation-plan.md#milestone-1-private-createopen-31b-acceptance-receipt) accepts private create/open at `5735f31764c0a9bf6c818b5c2f1ad9337370ab41` within its bounded native scope. Neither receipt accepts 31c, Milestone 1, production integration, or a product-semantics change. [CONTEXT.md](../../CONTEXT.md) owns product semantics; [ADR 0006](../adr/0006-use-a-user-scoped-mutation-lock.md) and [ADR 0007](../adr/0007-use-anchored-filesystem-mutations.md) own coordination and anchored authority. The [lifecycle plan](lifecycle-implementation-plan.md#first-serial-slices) owns delivery order and wider gates.
 
 Slice 31 extends the accepted native-handle boundary with authority facts, private create/open, and file/directory flock primitives. Slice 32, the canonical coordinator, follows only after these serial gates and remains production-unused initially. No caller, persistence, transaction, CLI, or release migration belongs here.
 
@@ -77,7 +77,12 @@ Regression additions precede production edits but were **not executed** by the w
 
 31b and 31c retain the exact future inventories above as planning only. No private create/open API, creation record, file handle, flock, coordinator, canonical anchor access, caller migration, dependency change, release-policy change, or next-slice implementation is included. Production Darwin integration remains **BLOCKED** by the unchanged `CGO_ENABLED=0` release policy. Independent review, native platform gates, clean verification, and vulnerability checks remain required before proceeding to 31b.
 
-## 31b implementation preparation — planned, not accepted
+## 31b implementation preparation — historical
+
+This section records pre-acceptance implementation and validation planning. Its
+pending-check and candidate-status statements are superseded by the [31b
+acceptance receipt](lifecycle-implementation-plan.md#milestone-1-private-createopen-31b-acceptance-receipt).
+Mechanism limits remain applicable; no acceptance transfers to 31c or coordinator32.
 
 The production-unused candidate adds separate private directory and lock-file
 open/exclusive-create operations, opaque shared-lifetime File.Close, and immutable

@@ -137,8 +137,8 @@ regular type, effective UID, exact 0600 and one link. Repository directories
 require effective UID and no group/other write or special bits. System ancestors
 require root/effective UID ownership and no group/other write or special bits;
 `/` requires root, and only the fixed platform temporary root permits root-owned
-01777. System ancestors are validation-only, never flock targets. The 31b
-candidate below uses these policies internally; no flock, canonical coordinator,
+01777. System ancestors are validation-only, never flock targets. The private create/open
+operations below use these policies internally; no flock, canonical coordinator,
 or production integration is included.
 
 The [slice contract](../../docs/plans/coordination-authority-slice.md) owns serial
@@ -168,7 +168,12 @@ This is not exact source mapping for runtime XNU 12377.91.3, universal filesyste
 proof, or elimination of ACL races. The diagnostic probe is not sole acceptance;
 the accepted 31a receipt in the slice contract owns that slice's evidence only.
 
-## Private create/open — planned 31b candidate, not accepted
+## Private create/open — accepted 31b, production-unused
+
+The [31b receipt](../../docs/plans/lifecycle-implementation-plan.md#milestone-1-private-createopen-31b-acceptance-receipt)
+accepts `5735f31764c0a9bf6c818b5c2f1ad9337370ab41` within its bounded Darwin/Linux
+native scope. It does not establish canonical CLI integration, flock or release
+support. The following mechanism and lifetime limits remain applicable.
 
 Open and create are separate: EEXIST refuses without fallback adoption. Existing
 objects are never chmodded, repaired, truncated or removed. File flags are fixed
@@ -225,7 +230,8 @@ cuts security ancestry above a private root, never physical guards. No canonical
 anchor is accessed. Tests were written before production source; the worker ran
 no tests, formatting, build, Git or validation commands, and claims no red run.
 
-Parent must obtain independent review and fresh native evidence through reviewed
+Parent red/green evidence and final platform checks are recorded in the receipt.
+Changes must repeat independent review and fresh native evidence through reviewed
 clean launchers, including formatting and `mise run verify` / `mise run vuln`.
 Run whole required aggregators, not selected children. Preserve the 40 native,
 12 common authority, 14 Darwin/cgo and eight Linux authority inventories. Unavailable
