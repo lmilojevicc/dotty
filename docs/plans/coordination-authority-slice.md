@@ -1,6 +1,6 @@
 # Coordination authority — slice 31 implementation/test contract
 
-**NONNORMATIVE · Planned · Production-unused.** This records the accepted scope and limits of oracle `9ab9a37a` and follow-up `71110014`, within the continuing full-plan authorization. It is not implementation evidence, Milestone 1 acceptance, or a product-semantics change. [CONTEXT.md](../../CONTEXT.md) owns product semantics; [ADR 0006](../adr/0006-use-a-user-scoped-mutation-lock.md) and [ADR 0007](../adr/0007-use-anchored-filesystem-mutations.md) own coordination and anchored authority. The [lifecycle plan](lifecycle-implementation-plan.md#first-serial-slices) owns delivery order and wider gates.
+**NONNORMATIVE · 31a accepted; 31b/31c planned · Production-unused.** This records the accepted scope and limits of oracle `9ab9a37a` and follow-up `71110014`, within the continuing full-plan authorization. The [31a receipt](lifecycle-implementation-plan.md#milestone-1-authority-facts-and-security-readers-31a-acceptance-receipt) accepts exact code `9504a628473d2c2287bf64ce53262e3c727e2dea` with bounded Darwin and Linux evidence. It does not accept 31b/31c, Milestone 1, production integration, or a product-semantics change. [CONTEXT.md](../../CONTEXT.md) owns product semantics; [ADR 0006](../adr/0006-use-a-user-scoped-mutation-lock.md) and [ADR 0007](../adr/0007-use-anchored-filesystem-mutations.md) own coordination and anchored authority. The [lifecycle plan](lifecycle-implementation-plan.md#first-serial-slices) owns delivery order and wider gates.
 
 Slice 31 extends the accepted native-handle boundary with authority facts, private create/open, and file/directory flock primitives. Slice 32, the canonical coordinator, follows only after these serial gates and remains production-unused initially. No caller, persistence, transaction, CLI, or release migration belongs here.
 
@@ -55,7 +55,9 @@ Platform-specific 31a inventory:
 
 Each gate requires independent source/integrity and test review, clean-environment `mise run verify` and `mise run vuln`, and non-skipped native required-case evidence with exact candidate, OS/architecture, filesystem/mount/security facts, build mode, executed leaves, and outcomes. Distinguish real native cases from injected failures and compile-only evidence. An unavailable required environment blocks acceptance; do not silently skip, weaken policy, or reuse old evidence. Only after 31c acceptance may unused coordinator slice 32 begin; production integration still requires the lifecycle plan's release-outcome and isolation readiness.
 
-## 31a implementation candidate — gates pending
+## 31a implementation handoff — historical preparation
+
+The following handoff records pre-acceptance implementation and validation planning. Its pending-gate and launcher-availability statements are historical, superseded by the [31a acceptance receipt](lifecycle-implementation-plan.md#milestone-1-authority-facts-and-security-readers-31a-acceptance-receipt). Mechanism limits still apply; no acceptance transfers to 31b or 31c.
 
 The serial-gate handoff implements **31a only**: immutable authority facts, descriptor filesystem/ACL readers, role policy, and a leased `Dir.Authority` observation that validates full production ancestry twice with the existing physical identity/topology guards. It does not authorize a later operation from saved facts. `Identity` remains unchanged. The native-handle inventory retains all 40 leaves; its private-API assertion additionally permits `Authority`.
 
