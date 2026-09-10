@@ -19,8 +19,17 @@ API:
   This is not durable authorization for a later action.
 - `RenameNoReplace(*Dir, Component, Identity, *Dir, Component) error` revalidates
   both chains and expected source identity, then performs native exclusive rename.
-- `(*Dir).Close() error` blocks new leases, waits for active operations, and closes
-  every owned descriptor once. Copies of a wrapper share that lifetime.
+- `(*Dir).OpenPrivateDir(Component) (*Dir, error)` opens an existing exact-0700
+  directory; `CreatePrivateDir(Component) (*Dir, CreationRecord, error)` creates
+  exclusively. Both validate system-ancestor parent policy internally.
+- `(*Dir).OpenLockFile(Component) (*File, error)` opens an existing lock file;
+  `CreateLockFile(Component) (*File, CreationRecord, error)` creates exclusively.
+  Both require an exact-0700 private parent and native lock-file authority.
+- `(*File).Close() error` closes its independent read-only descriptor once and
+  releases its retained parent lease, even on error. Copies share lifetime.
+- `(*Dir).Close() error` blocks new leases, waits for active operations **and
+  dependent Files**, and closes every owned descriptor once. Close dependent
+  Files before waiting for parent Close. Copies share that lifetime.
 
 Identity means device/inode/kind, not content, metadata, a durable snapshot, or
 atomic inode comparison-and-swap. Private leases protect descriptor lifetime
@@ -85,11 +94,11 @@ overrides. These compile-only safeguards leave the 40-case native inventory inta
 Both native Darwin and native Linux runs must record every required case and
 OS/architecture/revision provenance. Unsupported cross-builds are compile-only,
 not native acceptance evidence. Full verification, vulnerability checks, and fresh
-independent review remain required. This slice adds no user-lock creation API,
-coordination, transaction runner, caller migration, fidelity, or artifact authority.
-Future user-lock adversarial fixtures must never use the real OS-user lock anchor.
+independent review remain required. The 31b candidate adds private create/open primitives only, not canonical user
+coordination, a transaction runner, caller migration, fidelity, or artifact authority.
+User-lock adversarial fixtures must never use the real OS-user lock anchor.
 
-## Authority observations — 31a candidate, not accepted
+## Authority observations — 31a
 
 `AuthorityFacts` separates UID/GID, permission and special bits, link count,
 filesystem type/ID/mount flags, and security evidence from unchanged `Identity`.
@@ -128,9 +137,9 @@ regular type, effective UID, exact 0600 and one link. Repository directories
 require effective UID and no group/other write or special bits. System ancestors
 require root/effective UID ownership and no group/other write or special bits;
 `/` requires root, and only the fixed platform temporary root permits root-owned
-01777. System ancestors are validation-only, never flock targets. This candidate
-adds no file open/create, private directory creation, creation records, flock,
-canonical coordinator, or production integration.
+01777. System ancestors are validation-only, never flock targets. The 31b
+candidate below uses these policies internally; no flock, canonical coordinator,
+or production integration is included.
 
 The [slice contract](../../docs/plans/coordination-authority-slice.md) owns serial
 gates and full inventories. New required aggregators are `TestAuthorityBoundary`
@@ -157,9 +166,69 @@ required-attribute contract and pinned XNU `f6217f891ac0bb64f3d375211650a4c1ff8c
 four negatives. See the [probe notes](testdata/darwin-acl-probe/README.md).
 This is not exact source mapping for runtime XNU 12377.91.3, universal filesystem
 proof, or elimination of ACL races. The diagnostic probe is not sole acceptance;
-fresh reviewed 31a native gates remain pending.
+the accepted 31a receipt in the slice contract owns that slice's evidence only.
+
+## Private create/open — planned 31b candidate, not accepted
+
+Open and create are separate: EEXIST refuses without fallback adoption. Existing
+objects are never chmodded, repaired, truncated or removed. File flags are fixed
+`O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK|O_NOCTTY`, with `O_CREAT|O_EXCL` and
+requested 0600 only for creation. Type is observed before an existing file open,
+then FD/name/full ancestry are rebound and authority is observed repeatedly.
+These flags do not eliminate every device-open race. Future 31c must natively
+verify read-only local flock support; 31b implies none.
+
+Only an exclusively created, bound FD with native supported security, effective
+UID, regular type, one link, and only umask-reduced 0600 bits may establish 0600
+through fchmod. Exact mode and unchanged remaining facts are revalidated afterward.
+Mkdir requests 0700 without chmod or process-global umask changes. A restrictive
+umask result is retained and reported rather than repaired or deleted.
+
+Across **successful mkdir**, the direct parent's directory nlink may differ.
+Native APFS evidence (proc_e309: same parent identity/UID/GID/mode/filesystem/ACL,
+recorded nlink 2→3 after exclusive regular-file creation) supersedes the earlier
+mkdir-only assumption: successful exclusive **file creation** also permits this
+one field difference, but only with `EvidencePresent` filesystem model
+`darwin-local-apfs-ownership-enforced`, not GOOS or an unverified model string.
+After recording creation and binding the held regular FD to its parent/name,
+unchanged `privateParent(RolePrivateAnchor)` obtains two strictly equal guarded
+postcreation observations. Identity, UID/GID, mode, filesystem/mount/security and
+all higher-ancestor facts must match across creation before adopting that baseline.
+Linux file creation, existing opens, failed creates, precreation and all later
+comparisons remain strict; both pre-chmod file observations and post-chmod checks
+remain unchanged. Actual observations are retained, never normalized or required
+to differ by exactly one. The allowed APFS window is **not causal proof**: concurrent
+entry changes cannot be attributed separately, and confer no child-inventory or
+deletion authority. 31a readers/comparisons and `Dir.Authority` remain unchanged.
+Independently repinned child directories must match both the leased parent's
+entire chain and the first child observation. Mkdir success proves an event, not
+which inode it created: an indistinguishable replacement before first observation
+remains an observational limit.
+
+`CreationRecord` and `CreationObservation` expose only immutable value getters.
+They retain exact requested/observed paths and available identities/facts, never
+creator-inode or deletion authority. Every failure within a create operation after
+its successful creation syscall, including descriptor cleanup, preserves the
+record in `CreationError` and joins all causes. No moved path or restoration is
+inferred; retained/uncertain paths require inspection before retrying.
+
+`TestPrivateCreateOpenBoundary` declares exactly the contract's 12 roots and uses
+the maintained fail-on-missing/skip/filter inventory harness. Supporting tests
+cover narrow mkdir and APFS exclusive-file-create transitions (native guarded
+counts/records, injected model/field matrices, exact phase reachability and full
+binding guards), copied/concurrent File.Close and parent leases, real native ACL
+refusals, unavailable backends, and isolated-subprocess umasks. Strengthened
+replacement and post-chmod assertions retain exact hook/chmod counts, paths,
+reasons/causes and facts; hardlink aliases stay outside the direct parent.
+Positive fixtures retain real native filesystem/security readers; only `_test.go`
+cuts security ancestry above a private root, never physical guards. No canonical
+anchor is accessed. Tests were written before production source; the worker ran
+no tests, formatting, build, Git or validation commands, and claims no red run.
 
 Parent must obtain independent review and fresh native evidence through reviewed
-clean launchers before 31b. The supplied host launcher's `fmt` action only checks
-formatting; formatting changes require a reviewed clean formatting action. Do not
-run a child-only inventory filter or claim compile-only results as native gates.
+clean launchers, including formatting and `mise run verify` / `mise run vuln`.
+Run whole required aggregators, not selected children. Preserve the 40 native,
+12 common authority, 14 Darwin/cgo and eight Linux authority inventories. Unavailable
+Darwin/no-cgo and foreign-target results are capability/compile limits only, not
+native acceptance. Release configuration and the Darwin production blocker remain
+unchanged.

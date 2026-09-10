@@ -781,7 +781,7 @@ func testNoUnsafeFallback(t *testing.T) {
 }
 
 func testPrivateAPI(t *testing.T) {
-	for _, typ := range []reflect.Type{reflect.TypeFor[Dir](), reflect.TypeFor[Component]()} {
+	for _, typ := range []reflect.Type{reflect.TypeFor[Dir](), reflect.TypeFor[Component](), reflect.TypeFor[File](), reflect.TypeFor[CreationRecord](), reflect.TypeFor[CreationObservation]()} {
 		for i := range typ.NumField() {
 			field := typ.Field(i)
 			if field.IsExported() {
@@ -789,7 +789,15 @@ func testPrivateAPI(t *testing.T) {
 			}
 		}
 	}
-	want := map[string]bool{"Close": true, "Identity": true, "Observe": true, "Authority": true}
+	want := map[string]bool{
+		"Close": true, "Identity": true, "Observe": true, "Authority": true,
+		"OpenPrivateDir": true, "CreatePrivateDir": true,
+		"OpenLockFile": true, "CreateLockFile": true,
+	}
+	fileType := reflect.TypeFor[*File]()
+	if fileType.NumMethod() != 1 || fileType.Method(0).Name != "Close" {
+		t.Fatalf("unexpected File API: %v", fileType)
+	}
 	typ := reflect.TypeFor[*Dir]()
 	if typ.NumMethod() != len(want) {
 		t.Fatalf("unexpected Dir API: %v", typ)

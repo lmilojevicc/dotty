@@ -77,6 +77,59 @@ Regression additions precede production edits but were **not executed** by the w
 
 31b and 31c retain the exact future inventories above as planning only. No private create/open API, creation record, file handle, flock, coordinator, canonical anchor access, caller migration, dependency change, release-policy change, or next-slice implementation is included. Production Darwin integration remains **BLOCKED** by the unchanged `CGO_ENABLED=0` release policy. Independent review, native platform gates, clean verification, and vulnerability checks remain required before proceeding to 31b.
 
+## 31b implementation preparation — planned, not accepted
+
+The production-unused candidate adds separate private directory and lock-file
+open/exclusive-create operations, opaque shared-lifetime File.Close, and immutable
+observation-only CreationRecord/CreationError. EEXIST never adopts; existing
+objects are never repaired, truncated or removed. Private-directory parents use
+system-ancestor policy; lock-file parents require exact private-anchor policy.
+Production observations preserve full physical and security ancestry. Test-only
+private security roots retain real native readers and full physical guards.
+
+Successful mkdir permits direct-parent directory nlink inequality across that
+transition. Adopted APFS advice supersedes the earlier mkdir-only file assumption:
+native proc_e309 recorded the same APFS parent identity/UID/GID/mode/filesystem/ACL
+facts and nlink 2→3 after exclusive regular-file creation, refusing before chmod.
+A successful exclusive file open now has an explicit transition after immediate
+creation recording, held regular-FD identity observation and parent/name/full
+physical binding, before the unchanged pre-chmod `boundFile` loop. Unchanged
+`privateParent(RolePrivateAnchor)` supplies two strictly equal guarded postcreation
+observations. Only direct-parent DIRECTORY nlink may differ across file creation,
+and only for verified `EvidencePresent` filesystem model
+`darwin-local-apfs-ownership-enforced`; GOOS or an unverified string is insufficient.
+Identity, UID/GID, mode, filesystem/mount/security and every higher-ancestor fact
+must match before guarded adoption of the postcreation baseline. Linux file
+creation, existing opens, failed creates, precreation and later phases retain
+full equality. Actual counts are retained; no exact increment or causal attribution
+is asserted. Concurrent entry changes within this APFS window cannot be attributed
+separately; it proves neither child inventory nor deletion authority.
+31a readers, comparisons and Dir.Authority are unchanged. Repinned directories
+match both the leased parent chain and first child identity; mkdir still proves
+only a creation event. Restrictive-umask directories are retained without chmod.
+Exclusive file mode establishment requires same-FD/name/ancestry security binding
+before fchmod and exact-0600/otherwise-unchanged observations afterward. Fixed
+read-only/no-follow/nonblocking/no-ctty flags imply no universal device-race or
+future flock-support guarantee. File.Close releases its old parent lease once,
+even on error; parent Close waits for dependent Files.
+
+The exact twelve common roots in TestPrivateCreateOpenBoundary and supporting
+transition, close/lease, umask-subprocess and unavailable tests were defined before
+production private create/open source. Additional native ACL coverage supplements
+these roots. The APFS transition regressions were written before its production
+fix: native guarded counts/model/identity/facts and one exclusive creation record;
+injected model/evidence and complete non-nlink/higher-ancestor comparisons;
+failed/open/precreation/unstable-postcreation/later phases and binding guards.
+Existing exact hook/chmod reachability, refusal paths/reasons/causes/facts and
+isolated hardlink-alias assertions are preserved. Parent-reported tests-only RED
+proc40ad1 exposed eight previous zero-hook false passes with unchanged production;
+this candidate claims no green run or acceptance. This is source-order evidence
+only: the worker executed no tests,
+formatting, build, Git or validation commands. Fresh independent review, reviewed
+isolated parent formatting/verification/vulnerability checks, and complete native
+inventories remain required. No acceptance, lifecycle receipt, flock/31c,
+coordinator/32, caller, C4, dependency or release-policy change is included.
+
 ### Parent-only validation handoff
 
 The worker must be stopped before parent review/validation. Do not execute checks from an inherited shell or source the launcher. The reviewed launcher is `/Users/milo/Worktrees/dotty/agent-validation/coord-authority-1adkot34/host.sh`; its accepted actions are `preflight`, `fmt` (format **check**, not formatting), `verify`, and `vuln`. Parent must review source and launcher pins first. Native Darwin evidence must explicitly record cgo/compiler configuration rather than infer it from a passing non-cgo build. The existing launcher does not define a separate Linux or Darwin-no-cgo action; those require their own reviewed clean launch configurations, not worker-invented command extensions.
