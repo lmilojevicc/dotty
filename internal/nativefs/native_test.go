@@ -789,7 +789,7 @@ func testPrivateAPI(t *testing.T) {
 			}
 		}
 	}
-	want := map[string]bool{"Close": true, "Identity": true, "Observe": true}
+	want := map[string]bool{"Close": true, "Identity": true, "Observe": true, "Authority": true}
 	typ := reflect.TypeFor[*Dir]()
 	if typ.NumMethod() != len(want) {
 		t.Fatalf("unexpected Dir API: %v", typ)
