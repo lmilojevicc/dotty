@@ -59,10 +59,20 @@ func (d *Dir) authority(role AuthorityRole, calls authorityCalls) (AuthorityFact
 }
 
 func statAuthority(st *unix.Stat_t) AuthorityFacts {
+	mode, nlink := normalizeStatModeAndLinks(st.Mode, st.Nlink)
 	return AuthorityFacts{
 		identity: statIdentity(st), uid: st.Uid, gid: st.Gid,
-		mode: uint32(st.Mode) & 0o7777, nlink: uint64(st.Nlink),
+		mode: mode, nlink: nlink,
 	}
+}
+
+// Stat_t uses 16-bit mode/link fields on Darwin, 32-bit modes on Linux,
+// and 32- or 64-bit link counts depending on the Linux architecture.
+func normalizeStatModeAndLinks[M ~uint16 | ~uint32, N ~uint16 | ~uint32 | ~uint64](
+	mode M,
+	nlink N,
+) (uint32, uint64) {
+	return uint32(mode) & 0o7777, uint64(nlink)
 }
 
 func readAuthorityFacts(fd int, calls authorityCalls) (AuthorityFacts, error) {

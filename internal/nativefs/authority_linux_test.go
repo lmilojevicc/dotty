@@ -157,6 +157,6 @@ func testLinuxReadonlyOverlay(t *testing.T) {
 	calls := systemAuthorityCalls()
 	calls.filesystem = func(int) (FilesystemFacts, error) { return linuxFilesystemFacts(&st), nil }
 	_, err := d.authority(RolePrivateAnchor, calls)
-	authorityReason(t, err, ReasonUnsupported, "/")
+	_ = authorityReason(t, err, ReasonUnsupported, "/")
 	t.Logf("injected read-only overlay refused by unbounded production policy; fixture=%s", r)
 }

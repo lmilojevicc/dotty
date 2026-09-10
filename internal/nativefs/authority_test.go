@@ -62,6 +62,21 @@ func runAuthorityInventory(t *testing.T, inventory []string, cases map[string]fu
 	}
 }
 
+func TestNormalizeStatModeAndLinks(t *testing.T) {
+	mode, links := normalizeStatModeAndLinks(^uint16(0), ^uint16(0))
+	if mode != 0o7777 || links != 0xffff {
+		t.Fatalf("16-bit mode/links: got %#o/%d", mode, links)
+	}
+	mode, links = normalizeStatModeAndLinks(^uint32(0), ^uint32(0))
+	if mode != 0o7777 || links != 0xffffffff {
+		t.Fatalf("32-bit mode/links: got %#o/%d", mode, links)
+	}
+	mode, links = normalizeStatModeAndLinks(^uint32(0), ^uint64(0))
+	if mode != 0o7777 || links != ^uint64(0) {
+		t.Fatalf("32-bit mode/64-bit links: got %#o/%d", mode, links)
+	}
+}
+
 func TestAuthorityBoundary(t *testing.T) {
 	runAuthorityInventory(t, requiredAuthorityCases, map[string]func(*testing.T){
 		"ZeroEvidenceInvalid":                   testAuthorityZero,
