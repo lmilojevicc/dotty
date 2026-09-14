@@ -1,6 +1,6 @@
 # Coordination authority — slice 31 implementation/test contract
 
-**NONNORMATIVE · 31a/31b accepted; 31c planned · Production-unused.** This records the accepted scope and limits of oracle `9ab9a37a` and follow-up `71110014`, within the continuing full-plan authorization. The [31a receipt](lifecycle-implementation-plan.md#milestone-1-authority-facts-and-security-readers-31a-acceptance-receipt) accepts exact code `9504a628473d2c2287bf64ce53262e3c727e2dea` with bounded Darwin and Linux evidence. The separate [31b receipt](lifecycle-implementation-plan.md#milestone-1-private-createopen-31b-acceptance-receipt) accepts private create/open at `5735f31764c0a9bf6c818b5c2f1ad9337370ab41` within its bounded native scope. Neither receipt accepts 31c, Milestone 1, production integration, or a product-semantics change. [CONTEXT.md](../../CONTEXT.md) owns product semantics; [ADR 0006](../adr/0006-use-a-user-scoped-mutation-lock.md) and [ADR 0007](../adr/0007-use-anchored-filesystem-mutations.md) own coordination and anchored authority. The [lifecycle plan](lifecycle-implementation-plan.md#first-serial-slices) owns delivery order and wider gates.
+**NONNORMATIVE · 31a/31b/31c accepted · Production-unused.** This records the accepted scope and limits of oracle `9ab9a37a` and follow-up `71110014`, within the continuing full-plan authorization. The [31a receipt](lifecycle-implementation-plan.md#milestone-1-authority-facts-and-security-readers-31a-acceptance-receipt) accepts exact code `9504a628473d2c2287bf64ce53262e3c727e2dea` with bounded Darwin and Linux evidence. The separate [31b receipt](lifecycle-implementation-plan.md#milestone-1-private-createopen-31b-acceptance-receipt) accepts private create/open at `5735f31764c0a9bf6c818b5c2f1ad9337370ab41` within its bounded native scope. The [31c receipt](lifecycle-implementation-plan.md#milestone-1-filedirectory-flock-31c-acceptance-receipt) separately accepts file/directory flock at `b1c9565df245cb46bcae60f8e35dbf8965464333` within its bounded native scope. These receipts do not accept coordinator32, Milestone 1, production integration, or a product-semantics change. [CONTEXT.md](../../CONTEXT.md) owns product semantics; [ADR 0006](../adr/0006-use-a-user-scoped-mutation-lock.md) and [ADR 0007](../adr/0007-use-anchored-filesystem-mutations.md) own coordination and anchored authority. The [lifecycle plan](lifecycle-implementation-plan.md#first-serial-slices) owns delivery order and wider gates.
 
 Slice 31 extends the accepted native-handle boundary with authority facts, private create/open, and file/directory flock primitives. Slice 32, the canonical coordinator, follows only after these serial gates and remains production-unused initially. No caller, persistence, transaction, CLI, or release migration belongs here.
 
@@ -135,7 +135,12 @@ isolated parent formatting/verification/vulnerability checks, and complete nativ
 inventories remain required. No acceptance, lifecycle receipt, flock/31c,
 coordinator/32, caller, C4, dependency or release-policy change is included.
 
-## 31c implementation preparation — planned, not accepted
+## 31c implementation preparation — historical
+
+This section records pre-acceptance implementation and validation planning. Its
+pending-check and candidate-status statements are superseded by the [31c
+acceptance receipt](lifecycle-implementation-plan.md#milestone-1-filedirectory-flock-31c-acceptance-receipt).
+Mechanism limits remain applicable; coordinator32 requires its own gate.
 
 The production-unused candidate adds `Dir.LockFile(context.Context, Component)`,
 `Dir.LockDirectory(context.Context)` and opaque shared `Lease.Release() error`.

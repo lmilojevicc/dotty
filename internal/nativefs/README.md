@@ -100,9 +100,10 @@ overrides. These compile-only safeguards leave the 40-case native inventory inta
 Both native Darwin and native Linux runs must record every required case and
 OS/architecture/revision provenance. Unsupported cross-builds are compile-only,
 not native acceptance evidence. Full verification, vulnerability checks, and fresh
-independent review remain required. The private create/open and planned 31c flock
-primitives do not select canonical user coordination, implement a transaction
-runner, migrate callers, or supply fidelity or artifact authority.
+independent review remain required for changes. The accepted private create/open
+and bounded 31c flock primitives do not select canonical user coordination,
+implement a transaction runner, migrate callers, or supply fidelity or artifact
+authority.
 User-lock adversarial fixtures must never use the real OS-user lock anchor.
 
 ## Authority observations — 31a
@@ -187,8 +188,8 @@ objects are never chmodded, repaired, truncated or removed. File flags are fixed
 `O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK|O_NOCTTY`, with `O_CREAT|O_EXCL` and
 requested 0600 only for creation. Type is observed before an existing file open,
 then FD/name/full ancestry are rebound and authority is observed repeatedly.
-These flags do not eliminate every device-open race. The planned 31c native
-process gates must verify read-only local flock support; 31b implies none.
+These flags do not eliminate every device-open race. The separate 31c receipt
+records native read-only local flock evidence; 31b alone implies none.
 
 Only an exclusively created, bound FD with native supported security, effective
 UID, regular type, one link, and only umask-reduced 0600 bits may establish 0600
@@ -246,7 +247,12 @@ Darwin/no-cgo and foreign-target results are capability/compile limits only, not
 native acceptance. Release configuration and the Darwin production blocker remain
 unchanged.
 
-## File/directory flock — planned 31c, production-unused
+## File/directory flock — accepted 31c, production-unused
+
+The [31c receipt](../../docs/plans/lifecycle-implementation-plan.md#milestone-1-filedirectory-flock-31c-acceptance-receipt)
+accepts `b1c9565df245cb46bcae60f8e35dbf8965464333` within bounded Darwin/Linux
+native scope. It does not establish canonical coordination, caller integration,
+or release support; the mechanism and evidence limits below remain applicable.
 
 Each acquisition owns a new open file description, never a dup or the caller's
 shared directory FD. File acquisition uses existing-only 31b open and retains
@@ -278,8 +284,15 @@ validated private fixture identities and native root authority before the test
 security adapter. Contention proof is an observed native error, never a sleep.
 Full physical guards still cover ancestors above the private security boundary.
 
-The implementation worker ran no commands or checks. Independent review, parent
-formatting, clean `mise run verify`/`mise run vuln`, both native OS inventories,
-and unavailable/foreign-build limits remain required. Read-only flock support
-is **unproven until those real-process cases execute**. Prior inventories and
-Darwin's production cgo blocker remain unchanged; no 31c acceptance is recorded.
+The implementation worker ran no commands or checks. Parent native execution,
+red/green history, independent audits and capability limits are recorded in the
+receipt. Child stdout is not a raw IPC trace: handshake and selected-identity
+checks are source-backed assertions; logged root identity/type is independently
+correlated. Whole matching fixture/proof relocation remains unattributable from
+logs alone. The reordered post-Start reaping path lacks an injected pipe-close
+failure test; this explicitly reviewed coverage gap does not claim fault execution.
+
+Changes must repeat independent review, parent formatting, clean
+`mise run verify`/`mise run vuln`, both native OS inventories and
+unavailable/foreign-build checks. Prior inventories and Darwin's production cgo blocker remain unchanged;
+coordinator32 and broader integration remain separately gated.
