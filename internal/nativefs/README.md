@@ -17,6 +17,9 @@ API:
 - `(*Dir).Identity() (Identity, error)` revalidates the pinned directory chain.
 - `(*Dir).Observe(Component) (Identity, error)` observes the entry, not a symlink
   referent.
+- `(*Dir).ObserveRegular(context.Context, Component) (RegularObservation, error)`
+  returns immutable regular-file baseline metadata and a value SHA-256 digest.
+  This is geometry/data only, not authority or complete fidelity (see below).
 - `(*Dir).Authority(AuthorityRole) (AuthorityFacts, error)` validates immutable
   descriptor authority observations and full security ancestry under a lease.
   This is not durable authorization for a later action.
@@ -108,6 +111,50 @@ and bounded 31c flock primitives do not select canonical user coordination,
 implement a transaction runner, migrate callers, or supply fidelity or artifact
 authority.
 User-lock adversarial fixtures must never use the real OS-user lock anchor.
+
+## Regular-file observations — slice 33a, production-unused
+
+`ObserveRegular` owns one parent lease and a fresh existing-only no-follow raw
+FD. Complete physical ancestry and exact FD/name metadata are checked before
+reading and after the bounded read. Baselines include identity validity, UID/GID,
+07777 mode bits, link count, signed nonnegative size, and exact mtime/ctime
+seconds/nanoseconds. A fixed 32 KiB buffer hashes the initial size followed by a
+one-byte EOF probe, without computing size+1. Short reads and no-progress EINTR
+are handled with cancellation/Close checkpoints; invalid native results refuse.
+FD close is attempted once, errors are joined, and publication serializes against
+parent Close only after cleanup, retaining the original parent lease throughout.
+All failures return a wholly zero invalid value. Error metadata is evidence only,
+not a valid digest observation. No descriptor, reader, or callback is exposed.
+
+General readable files may have other owners, arbitrary modes/special bits, and
+multiple hardlinks. No authority-role, effective-UID, filesystem allowlist, ACL,
+or single-link policy is inferred. Linux and Darwin data observations can work
+without cgo; this does not widen Darwin authority/flock/coordinator or release
+support. Foreign stubs fail closed. Existing authority and caller policy remain
+unchanged.
+
+Reading may update atime, even on failure or cancellation. Atime is neither
+compared nor returned/restored; no O_NOATIME or intentional timestamp writes are
+used. Context and Close are observed between synchronous calls, not within
+blocked regular-file I/O. Fixed memory and the initial-size byte budget are not a
+small total-work or wall-clock bound. Mixed reads, timestamp granularity, inode
+reuse/ABA, a hostile device-open race, and changes after final checks remain
+possible. No snapshot, complete fidelity, capture, provenance, or cleanup
+permission follows. Before planning/dry-run or caller integration, the product
+must decide whether ordinary read-induced atime changes are acceptable; exact
+preservation would require revisiting this design.
+
+`TestRegularObservationBoundary` has the contract's independent 15-root inventory
+and nested fail-on-missing/duplicate/skip/filter inventories. Native private file,
+mode and hardlink checks are separate from counterfactual foreign-owner/stat
+injections. Simulated FD zero never reads or closes stdin. Concurrency uses
+bounded channel handshakes and cleanup joins. Existing foreign compile tests
+include `TestRegularObservationUnavailable`; compilation is not runtime evidence.
+Tests and the initial inventory preceded production edits. The implementation
+worker ran no commands. Parent-reviewed launchers, independent review, complete
+Darwin/Linux inventories, mise formatting and full verification/vulnerability
+checks, and separate Darwin/no-cgo/foreign compilation remain required by the
+[33a contract](../../docs/plans/regular-observation-slice.md).
 
 ## Authority observations — 31a
 

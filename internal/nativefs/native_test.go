@@ -790,7 +790,7 @@ func testPrivateAPI(t *testing.T) {
 		}
 	}
 	want := map[string]bool{
-		"Close": true, "Identity": true, "Observe": true, "Authority": true,
+		"Close": true, "Identity": true, "Observe": true, "ObserveRegular": true, "Authority": true,
 		"OpenPrivateDir": true, "CreatePrivateDir": true,
 		"OpenLockFile": true, "CreateLockFile": true,
 		"LockFile": true, "LockDirectory": true,

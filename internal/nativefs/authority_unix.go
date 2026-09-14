@@ -66,15 +66,6 @@ func statAuthority(st *unix.Stat_t) AuthorityFacts {
 	}
 }
 
-// Stat_t uses 16-bit mode/link fields on Darwin, 32-bit modes on Linux,
-// and 32- or 64-bit link counts depending on the Linux architecture.
-func normalizeStatModeAndLinks[M ~uint16 | ~uint32, N ~uint16 | ~uint32 | ~uint64](
-	mode M,
-	nlink N,
-) (uint32, uint64) {
-	return uint32(mode) & 0o7777, uint64(nlink)
-}
-
 func readAuthorityFacts(fd int, calls authorityCalls) (AuthorityFacts, error) {
 	var before, after unix.Stat_t
 	if err := calls.stat(fd, &before); err != nil {
