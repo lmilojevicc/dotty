@@ -1,7 +1,9 @@
 // Package nativefs owns a small descriptor-relative native filesystem boundary.
-// It accepts physical absolute directory paths, not logical aliases. It does not
-// resolve repositories, coordinate processes, preserve copy fidelity, or report
-// transaction outcomes. No production command uses this package yet.
+// Primitive APIs accept physical absolute directory paths, not logical aliases.
+// The native coordinator alone resolves a logical repository batch and owns
+// user/repository process coordination. Config/default selection, Manifest
+// interpretation, copy fidelity, and transaction outcomes remain outside this
+// boundary. No production command uses this package yet.
 //
 // Ownership is enforced at this package's API boundary: no descriptors or lease
 // callbacks are exported. This is not containment against malicious code inside

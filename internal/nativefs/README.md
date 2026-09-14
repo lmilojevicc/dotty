@@ -4,7 +4,10 @@ This standalone package is not used by production commands. It does not change
 `ResolveRepo` or logical repository-alias semantics. `OpenPhysicalDir` accepts
 only explicit physical absolute paths (`/` or slash-separated valid components),
 refusing symlink directories, relative paths, repeated/trailing separators, and
-`.`/`..`. Future alias validation/resolution belongs above this boundary.
+`.`/`..`. The coordinator's one repository batch is the sole logical-alias
+resolution exception; all existing primitive contracts remain physical-only.
+Config/default selection, Manifest interpretation, CLI behavior, transaction
+outcomes, and caller migration remain outside this package.
 
 API:
 
@@ -146,8 +149,9 @@ require effective UID and no group/other write or special bits. System ancestors
 require root/effective UID ownership and no group/other write or special bits;
 `/` requires root, and only the fixed platform temporary root permits root-owned
 01777. System ancestors are validation-only, never flock targets. The private create/open
-and flock operations below use these policies internally; no canonical coordinator
-or production integration is included.
+and flock operations below use these policies internally. Those primitives alone
+provide neither canonical coordination nor production integration; the unused
+coordinator described below composes them without weakening their contracts.
 
 The [slice contract](../../docs/plans/coordination-authority-slice.md) owns serial
 gates and full inventories. New required aggregators are `TestAuthorityBoundary`
@@ -296,3 +300,70 @@ Changes must repeat independent review, parent formatting, clean
 `mise run verify`/`mise run vuln`, both native OS inventories and
 unavailable/foreign-build checks. Prior inventories and Darwin's production cgo blocker remain unchanged;
 coordinator32 and broader integration remain separately gated.
+
+## Canonical coordinator — slice 32, production-unused
+
+The [planned contract](../../docs/plans/coordinator-implementation-slice.md) owns
+scope and gates; this section records implementation shape, not acceptance.
+
+- `AcquireUser(context.Context) (*UserLease, error)` uses only the fixed native
+  system temporary root and decimal effective UID: Linux
+  `/tmp/dotty-<euid>/mutation.lock`, Darwin
+  `/private/tmp/dotty-<euid>/mutation.lock`. Environment and repository/config
+  choices do not select the lock domain.
+- `(*UserLease).LockRepositories(context.Context, []string) error` accepts exactly
+  one complete batch of absolute logical paths, including empty. Only existing
+  directories qualify. Resolve config/default selection between these stages
+  while holding the user lease; this is caller discipline, not caller migration
+  or a type-enforced config boundary.
+- `(*UserLease).RepositoryBindings() []RepositoryBinding` returns logical path,
+  recorded physical path and identity values in selection order, only after
+  publication. These are evidence, not mutation handles or durable authority.
+- `(*UserLease).CreationRecords() []CreationRecord` retains bootstrap evidence
+  after release. `CoordinatorError` carries the same records when acquisition
+  returns no lease or later acquisition/release fails, together with native
+  causes and exact logical/physical diagnostics.
+- `(*UserLease).Release() error` shares once-only lifetime across copied wrappers
+  and concurrent calls. It cancels pending batch work, waits outside the mutex,
+  then releases repository leases in reverse acquisition order, repository pins,
+  the user lease, anchor and root. Every cleanup is attempted and errors joined.
+
+Full root authority precedes any creation. Only the exact exclusive-create
+syscall EEXIST diagnostic, wholly zero record and no additional cause permits a
+separate existing-only open. Collision itself grants no authority. No retry,
+repair, disappearance loop or anchor removal is performed. The bootstrap File
+stays open through independent `LockFile` acquisition and strict descriptor/name/
+full-ancestry/authority comparison; a different valid inode refuses. Bootstrap
+close is attempted once; comparison or close failure unwinds all ownership.
+Strict post-bootstrap baselines do not carry creation-transition exceptions into
+waiting or publication.
+
+Logical paths are not cleaned before symlink-sensitive `..` resolution. Physical
+pins retain complete authority baselines; locks are acquired in physical byte
+order. Only identical physical-path/identity pairs deduplicate. Same identity
+through distinct physical topologies refuses. Aliases are re-resolved without
+switching the recorded selection. After the last wait, every repository, the
+user lock, anchor and root are revalidated, even for an empty batch. Concurrent
+batch attempts have one winner; losing attempts do not cancel it. Winning failure
+is terminal. Release serializes with publication; cancellation after publication
+does not revoke ownership. Observations remain non-atomic against external ABA
+and uncooperative writers; strict comparisons can also refuse benign drift.
+
+`TestCoordinatorBoundary` maintains the exact fourteen contract roots, declared
+with implementations before production coordinator edits. Supporting tests cover
+bootstrap replacement/close failure, final user/anchor/root drift, contradictory
+physical topologies, concurrent batches, and bounded native child serialization
+across different repository/config-selection choices. The topology-equivalence
+negative is a value-level test, not a native bind-mount fixture. Private positive
+fixtures use real native metadata through `_test.go` security adapters with full
+physical guards. Child pipes, identity/authority checks, time/output limits and
+kill/reap ownership are test infrastructure, not production overrides. Canonical
+identity tests do not acquire or write the host UID anchor. Bounded integration
+is not canonical CLI proof.
+
+No worker commands or checks accompany these source edits. Independent review,
+parent-owned reviewed clean formatting, whole native inventories on both OSes,
+`mise run verify`, `mise run vuln`, and separate unavailable/no-cgo/foreign-build
+checks remain required. Prior inventories, the unresolved `before_anchor_INT`
+fixture-timeout investigation requirement on recurrence, and Darwin's unchanged
+cgo-disabled production release blocker remain in force.
