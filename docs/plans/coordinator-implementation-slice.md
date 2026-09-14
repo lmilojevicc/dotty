@@ -1,8 +1,11 @@
 # Canonical coordinator — slice 32 contract
 
-**NONNORMATIVE · Planned · Production-unused.** This freezes the parent-adopted
-scope of scout `81b29a6c` and oracle `a7782100` after the accepted native authority,
-creation and flock slices. [CONTEXT.md](../../CONTEXT.md) owns product semantics;
+**NONNORMATIVE · Bounded slice accepted · Production-unused.** The [32 acceptance
+receipt](lifecycle-implementation-plan.md#milestone-1-canonical-coordinator-32-acceptance-receipt)
+accepts exact code `ee84b6e3c86053d2ab7f5f1b20d12625b82ad499` with separate bounded
+Darwin and Linux evidence, not canonical CLI, caller or release integration.
+This contract freezes the parent-adopted scope of scout `81b29a6c` and oracle
+`a7782100` after the accepted native authority, creation and flock slices. [CONTEXT.md](../../CONTEXT.md) owns product semantics;
 [ADR 0006](../adr/0006-use-a-user-scoped-mutation-lock.md) and
 [ADR 0007](../adr/0007-use-anchored-filesystem-mutations.md) own mechanisms. The
 [lifecycle plan](lifecycle-implementation-plan.md) owns sequencing and acceptance.
