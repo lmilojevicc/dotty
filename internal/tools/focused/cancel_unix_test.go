@@ -185,8 +185,17 @@ func focusedCancellationEvent(root, event string) {
 
 func TestFocusedCancellationProcessFixture(_ *testing.T) {
 	mode := os.Getenv("DOTTY_FOCUSED_CANCEL_FIXTURE")
+	if mode == "capture exit" || mode == "capture writer" {
+		protocolCaptureFixture(mode)
+	}
 	if mode != "" {
-		focusedCancellationEvent(os.Getenv("DOTTY_FOCUSED_CANCEL_ROOT"), "starting "+mode)
+		root := os.Getenv("DOTTY_FOCUSED_CANCEL_ROOT")
+		// Protocol-only authority is checked and immutable. The original
+		// process-events stream remains best-effort diagnostics, never proof.
+		if err := protocolFixtureIdentity(root, mode+"-start", 0); err != nil {
+			os.Exit(9)
+		}
+		focusedCancellationEvent(root, "starting "+mode)
 	}
 	switch mode {
 	case "runner":
@@ -202,7 +211,14 @@ func TestFocusedCancellationProcessFixture(_ *testing.T) {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestFocusedCancellationProcessFixture$")
 		cmd.Env = append(os.Environ(), "DOTTY_FOCUSED_CANCEL_FIXTURE=descendant")
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		root := os.Getenv("DOTTY_FOCUSED_CANCEL_ROOT")
+		if err := protocolFixtureIdentity(root, "child-spawn-intent", 0); err != nil {
+			os.Exit(9)
+		}
 		if err := cmd.Start(); err != nil {
+			os.Exit(9)
+		}
+		if err := protocolFixtureIdentity(root, "child-spawn", cmd.Process.Pid); err != nil {
 			os.Exit(9)
 		}
 		if behavior == "early close" {
@@ -219,6 +235,9 @@ func TestFocusedCancellationProcessFixture(_ *testing.T) {
 			os.Exit(0)
 		}
 		if err := cmd.Wait(); err != nil {
+			os.Exit(9)
+		}
+		if err := protocolFixtureIdentity(root, "child-reaped", cmd.Process.Pid); err != nil {
 			os.Exit(9)
 		}
 		os.Exit(0)
@@ -243,7 +262,31 @@ func TestFocusedCancellationProcessFixture(_ *testing.T) {
 			}
 		}
 		focusedCancellationEvent(root, "descendant ready")
-		if err := os.WriteFile(filepath.Join(root, "ready"), []byte("ready"), 0o600); err != nil {
+		if os.Getenv("FOCUSED_PROTOCOL_STRICT") == "1" {
+			// Bind readiness to the checked inherited outer record AND this
+			// process's immutable start identity. Inner work may have a distinct
+			// group; that topology is accounted separately, never signalled here.
+			anchor := os.Getenv("FOCUSED_PROTOCOL_ANCHOR")
+			if err := protocolCheckOuterRecord(root, anchor); err != nil {
+				os.Exit(9)
+			}
+			id, err := readProtocolIdentity(root, "descendant-start")
+			group, groupErr := syscall.Getpgid(0)
+			if err != nil || groupErr != nil || id.pid != os.Getpid() ||
+				id.parent != os.Getppid() ||
+				id.group != group {
+				os.Exit(9)
+			}
+			record := protocolFrame(
+				os.Getenv("FOCUSED_PROTOCOL_BOUNDARY"),
+				os.Getenv("FOCUSED_PROTOCOL_EPOCH"),
+				anchor,
+				"descendant-ready",
+			)
+			if err := publishProtocolRecord(filepath.Join(root, "ready"), record); err != nil {
+				os.Exit(9)
+			}
+		} else if err := os.WriteFile(filepath.Join(root, "ready"), []byte("ready"), 0o600); err != nil {
 			os.Exit(9)
 		}
 		time.Sleep(2 * time.Second)
