@@ -1866,6 +1866,609 @@ class DirectoryRoleTests(unittest.TestCase):
         self.assertEqual(set(observed), set(expected))
 
 
+class CollectorProgressTests(unittest.TestCase):
+    """Portable fake clock/FD/capture regressions; no native resources or children."""
+    def setUp(self):
+        with mock.patch.dict(os.environ, {
+                'RUNNER_TEMP': '/private', 'GITHUB_RUN_ID': '1',
+                'GITHUB_RUN_ATTEMPT': '1', 'GITHUB_WORKSPACE': '/checkout'}):
+            self.module = load_source('native_ci_progress_subject', 'native_ci.py')
+        self.clock = [1000.0]
+        self.writes = []
+        self.fake = SimpleNamespace(dup=mock.Mock(return_value=91),
+                                    write=mock.Mock(side_effect=self.write), close=mock.Mock())
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        m = self.module
+        self.stack.enter_context(mock.patch.object(m, 'os', self.fake))
+        self.stack.enter_context(mock.patch.object(m.time, 'monotonic', side_effect=lambda: self.clock[0]))
+        self.stack.enter_context(mock.patch.object(m, 'COLLECTION_END', 1120.0))
+
+    def write(self, fd, wire):
+        self.writes.append((fd, wire, self.clock[0]))
+        return len(wire)
+
+    def records(self):
+        return [dict(field.split('=', 1) for field in wire.decode().split()[1:])
+                for _, wire, _ in self.writes]
+
+    def test_fixed_labels_numeric_bounds_and_finite_console_budget(self):
+        m = self.module
+        self.assertEqual(m.COLLECTOR_PHASES, (
+            'binding', 'logparse', 'metadata', 'journalcapture', 'strictconsumers',
+            'captureclosure', 'curation', 'finalinventory', 'readiness'))
+        self.assertEqual((m.COLLECTOR_PROGRESS_RECORDS, m.COLLECTOR_PROGRESS_RECORD_BYTES,
+                          m.COLLECTOR_PROGRESS_BYTES), (18, 256, 4608))
+        with m.CollectorProgress(1000) as progress:
+            for phase in m.COLLECTOR_PHASES:
+                progress.mark(phase, 'start')
+                self.clock[0] = 1119.999
+                progress.mark(phase, 'done', 20000, 96 * 1024**2)
+            self.assertFalse(progress.failed)
+            progress.mark('binding', 'start')  # Duplicate never extends the budget.
+            self.assertTrue(progress.failed)
+        self.assertEqual(len(self.writes), 18)
+        self.assertLessEqual(sum(len(wire) for _, wire, _ in self.writes), 4608)
+        for record, (fd, wire, at) in zip(self.records(), self.writes):
+            self.assertEqual(fd, 91)
+            self.assertLess(at, 1120)
+            self.assertLessEqual(len(wire), 256)
+            self.assertTrue(wire.isascii())
+            self.assertEqual(wire.count(b'\n'), 1)
+            self.assertEqual(set(record), {'phase', 'event', 'elapsed_ms', 'units', 'bytes'})
+            self.assertLess(int(record['elapsed_ms']), 120000)
+        self.fake.dup.assert_called_once_with(2)
+        self.fake.close.assert_called_once_with(91)
+
+    def test_arbitrary_labels_events_and_nonbounded_counters_never_serialize(self):
+        m = self.module
+        for args in (('/secret/root\x1b\n', 'start'), ('binding', 'payload\n'),
+                     ('metadata', 'done', '/private'), ('metadata', 'done', -1),
+                     ('metadata', 'done', 20001), ('metadata', 'done', True),
+                     ('journalcapture', 'done', 0, 96 * 1024**2 + 1),
+                     ('journalcapture', 'done', 0, 'exception text')):
+            with self.subTest(args=args), m.CollectorProgress(1000) as progress:
+                progress.mark(*args)
+                progress.mark('binding', 'start')
+                self.assertTrue(progress.failed)
+        self.assertEqual(self.writes, [])
+
+    def test_deadline_before_setup_and_before_write_is_silent(self):
+        m = self.module
+        self.clock[0] = 1120
+        with self.assertRaises(m.CollectionDeadline), m.CollectorProgress(1000):
+            self.fail('expired setup')
+        self.fake.dup.assert_not_called()
+        self.clock[0] = 1000
+        with m.CollectorProgress(1000) as progress:
+            # First guard passes; formatting consumes the remaining original budget.
+            with mock.patch.object(m.time, 'monotonic', side_effect=[1000, 1120, 1120]):
+                with self.assertRaises(m.CollectionDeadline):
+                    progress.mark('binding', 'start')
+        self.assertEqual(self.writes, [])
+        self.fake.close.assert_called_once_with(91)
+
+    def test_failed_or_short_write_disables_sink_without_retry_or_fallback(self):
+        m = self.module
+        for failure in (OSError(errno.EIO, 'private exception\x1b\n'), 0, 3):
+            self.fake.write.reset_mock()
+            self.fake.write.side_effect = failure if isinstance(failure, OSError) else None
+            self.fake.write.return_value = failure
+            with self.subTest(failure=type(failure).__name__), m.CollectorProgress(1000) as progress:
+                progress.mark('binding', 'start')
+                progress.mark('binding', 'done', 1)
+                self.assertTrue(progress.failed)
+            self.fake.write.assert_called_once()
+            self.assertNotIn(b'private exception', self.fake.write.call_args.args[1])
+        self.assertEqual(self.fake.close.call_args_list, [mock.call(91)] * 3)
+
+    def test_dup_and_close_failures_never_close_inherited_or_mask_primary(self):
+        m = self.module
+        self.fake.dup.side_effect = OSError(errno.EMFILE, 'private')
+        with m.CollectorProgress(1000) as progress:
+            progress.mark('binding', 'start')
+        self.assertTrue(progress.failed)
+        self.fake.close.assert_not_called()
+        self.fake.write.assert_not_called()
+        self.fake.dup.side_effect = None
+        self.fake.close.side_effect = OSError(errno.EIO, 'private close')
+        for primary in (m.CollectionDeadline('private deadline'), ValueError('primary')):
+            with self.subTest(primary=type(primary).__name__):
+                with self.assertRaises(type(primary)) as raised:
+                    with m.CollectorProgress(1000) as progress:
+                        raise primary
+                self.assertIs(raised.exception, primary)
+                self.assertTrue(progress.failed)
+                self.assertIsNone(progress.fd)
+        self.assertEqual(self.fake.close.call_args_list, [mock.call(91)] * 2)
+        self.assertEqual(self.writes, [])
+
+    def captured_route(self, operation=None, curate=None):
+        m = self.module
+        captures = {}
+        class Output(io.StringIO):
+            def __init__(self, path, *args, **kwargs):
+                super().__init__()
+                self.path = path
+            def close(self):
+                if not self.closed:
+                    captures[self.path.name] = self.getvalue()
+                super().close()
+        self.stack.enter_context(mock.patch.object(m, 'PrivateOutput', Output))
+        self.stack.enter_context(mock.patch.object(m, 'bind', return_value={'ancestry': {}, 'directories': {}}))
+        self.stack.enter_context(mock.patch.object(m.signal, 'signal'))
+        alarm = self.stack.enter_context(mock.patch.object(m.signal, 'alarm'))
+        if operation is not None:
+            self.stack.enter_context(mock.patch.object(m, 'collect_evidence', side_effect=operation))
+        curation = self.stack.enter_context(mock.patch.object(m, 'curate_upload', side_effect=curate,
+                                                             return_value=0))
+        return captures, alarm, curation
+
+    def test_capture_true_routes_progress_to_original_sink_not_private_payload(self):
+        m = self.module
+        def operation(progress):
+            print('private stdout payload')
+            print('private stderr payload', file=m.sys.stderr)
+            progress.mark('binding', 'done', 1)
+            return 0
+        captures, alarm, _ = self.captured_route(operation)
+        self.assertEqual(m.collect(capture=True), 0)
+        self.assertEqual(captures, {'collector.stdout': 'private stdout payload\n',
+                                    'collector.stderr': 'private stderr payload\n', 'collector.exit': '0\n'})
+        self.assertEqual([(r['phase'], r['event'], r['units']) for r in self.records()],
+                         [('binding', 'start', '0'), ('binding', 'done', '1'),
+                          ('captureclosure', 'start', '0'), ('captureclosure', 'done', '1')])
+        self.assertNotIn(b'private', b''.join(wire for _, wire, _ in self.writes))
+        self.assertEqual(alarm.call_args_list, [mock.call(120), mock.call(0)])
+        self.fake.close.assert_called_once_with(91)
+
+    def test_capture_true_diagnostic_failure_cannot_turn_into_success(self):
+        m = self.module
+        self.captured_route(lambda progress: 0)
+        for failure in ('dup', 'write', 'short', 'close'):
+            with self.subTest(failure=failure):
+                self.fake.dup.side_effect = OSError('dup') if failure == 'dup' else None
+                self.fake.write.side_effect = OSError('write') if failure == 'write' else self.write
+                if failure == 'short':
+                    self.fake.write.side_effect = lambda fd, wire: 1
+                self.fake.close.side_effect = OSError('close') if failure == 'close' else None
+                self.assertEqual(m.collect(capture=True), 1)
+
+    def test_capture_true_failure_suppresses_followup_progress_preserves_status(self):
+        m = self.module
+        def operation(progress):
+            raise m.CommandFailure(7, 'primary')
+        def curate(end, started, progress):
+            self.assertEqual((started, end), (1000, 1120))
+            progress.mark('curation', 'start')
+            return 0
+        _, _, curation = self.captured_route(operation, curate)
+        self.fake.close.side_effect = OSError('close cannot mask exit7')
+        self.assertEqual(m.collect(capture=True), 7)
+        curation.assert_called_once()
+        self.assertEqual([(r['phase'], r['event']) for r in self.records()], [('binding', 'start')])
+
+    def test_capture_true_expiry_unwinds_silently_without_completion_or_curation(self):
+        m = self.module
+        def operation(progress):
+            progress.mark('binding', 'done', 1)
+            self.clock[0] = 1120
+            raise m.CollectionDeadline('must not be rendered')
+        captures, alarm, curate = self.captured_route(operation)
+        self.fake.close.side_effect = OSError('must not mask deadline')
+        console = io.StringIO()
+        with mock.patch.object(m.sys, 'stderr', console):
+            self.assertEqual(m.dispatch_cli('collect'), 1)
+        self.assertEqual(console.getvalue(), '')
+        self.assertEqual(captures, {'collector.stdout': '', 'collector.stderr': ''})
+        self.assertTrue(all(at < 1120 for _, _, at in self.writes))
+        self.assertEqual([(r['phase'], r['event']) for r in self.records()],
+                         [('binding', 'start'), ('binding', 'done')])
+        curate.assert_not_called()
+        self.fake.close.assert_called_once_with(91)
+        self.assertEqual(alarm.call_args_list, [mock.call(120), mock.call(0)])
+
+    def test_real_collector_phase_wiring_counts_only_finished_consumers(self):
+        m = self.module
+        self.captured_route()
+        lane, raw = 'protocol-StartFailure', b'synthetic private transcript'
+        receipt = {'exit': 0, 'discarded': 0, 'drained': True, 'complete': True,
+                   'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(),
+                   'streams': [len(raw), 0], 'stream_sha256': {
+                       'stdout': hashlib.sha256(raw).hexdigest(), 'stderr': hashlib.sha256(b'').hexdigest()}}
+        data = {lane + '.log': raw, lane + '.stdout': raw, lane + '.stderr': b'',
+                lane + '.result.json': json.dumps(receipt).encode(),
+                'main-status.json': b'{"exit":0}', 'main.exit': b'0\n'}
+        self.fake.scandir = lambda fd: mock.MagicMock(__enter__=lambda self: [])
+        ancestry = mock.MagicMock()
+        ancestry.__enter__.return_value = [(None, None, 7)]
+        with ExitStack() as stack:
+            for name, value in (('TEST_LANES', [lane]), ('COMMAND_LANES', [lane])):
+                stack.enter_context(mock.patch.object(m, name, value))
+            stack.enter_context(mock.patch.object(m, 'trusted_ancestry', return_value=ancestry))
+            stack.enter_context(mock.patch.object(m, 'require_bindings', return_value={}))
+            stack.enter_context(mock.patch.object(m, 'read_private', side_effect=lambda path, limit: data.get(path.name, b'{}')))
+            stack.enter_context(mock.patch.object(m, 'write_json'))
+            stack.enter_context(mock.patch.object(m, 'collection_archive', return_value=mock.MagicMock()))
+            stack.enter_context(mock.patch.object(m.evidence, 'diagnostic_root_roles', return_value=({}, [])))
+            stack.enter_context(mock.patch.object(m.evidence, 'protocol_root_roles', return_value={}))
+            stack.enter_context(mock.patch.object(m.evidence, 'check_export_records'))
+            stack.enter_context(mock.patch.object(m.evidence, 'check_fatal_owner_witnesses'))
+            consumer = stack.enter_context(mock.patch.object(m.evidence, 'check_text'))
+            self.assertEqual(m.collect(capture=True), 0)
+            done = {r['phase']: int(r['units']) for r in self.records() if r['event'] == 'done'}
+            self.assertEqual(done, {'binding': 1, 'logparse': 1, 'metadata': 0,
+                                    'journalcapture': 0, 'strictconsumers': 5, 'captureclosure': 1})
+            self.writes.clear()
+            consumer.side_effect = AssertionError('consumer failed')
+            self.assertEqual(m.collect(capture=True), 1)
+            self.assertNotIn(('strictconsumers', 'done'), [(r['phase'], r['event']) for r in self.records()])
+            self.assertNotIn('captureclosure', [r['phase'] for r in self.records()])
+
+    def test_curation_final_inventory_and_readiness_follow_real_work(self):
+        m = self.module
+        names = []
+        self.fake.environ = {}
+        self.fake.scandir = lambda fd: mock.MagicMock(__enter__=lambda self: [SimpleNamespace(name=n) for n in names])
+        ancestry = mock.MagicMock()
+        ancestry.__enter__.return_value = [(None, None, 7)]
+        def receipt(path, value):
+            if path.name == 'upload-manifest.json':
+                names.append(path.name)
+            return {'closed': True}
+        with ExitStack() as stack:
+            for name, value in (('bind', None), ('upload_roles', {}), ('create_private_directory', None),
+                                ('require_bindings', {}), ('publication_context', {})):
+                stack.enter_context(mock.patch.object(m, name, return_value=value))
+            stack.enter_context(mock.patch.object(m, 'trusted_ancestry', return_value=ancestry))
+            stack.enter_context(mock.patch.dict(m.BOUND_DIRECTORIES, {str(m.ROOT / 'upload'): {}}))
+            write = stack.enter_context(mock.patch.object(m, 'write_json', side_effect=receipt))
+            inventory = stack.enter_context(mock.patch.object(m, 'upload_inventory', return_value={'upload-manifest.json': {'closed': True}}))
+            with m.CollectorProgress(1000) as progress:
+                self.assertEqual(m.curate_upload(1120, 1000, progress), 0)
+            self.assertEqual([(r['phase'], r['event'], r['units']) for r in self.records()],
+                             [('curation', 'start', '0'), ('curation', 'done', '0'),
+                              ('finalinventory', 'start', '0'), ('finalinventory', 'done', '1'),
+                              ('readiness', 'start', '0'), ('readiness', 'done', '1')])
+            self.assertEqual(write.call_args.args[0], m.ROOT / 'upload-ready.json')
+            names.clear()
+            self.writes.clear()
+            write.reset_mock()
+            inventory.side_effect = m.CollectionDeadline('inventory expiry')
+            with self.assertRaises(m.CollectionDeadline), m.CollectorProgress(1000) as progress:
+                m.curate_upload(1120, 1000, progress)
+            self.assertEqual([(r['phase'], r['event']) for r in self.records()][-1], ('finalinventory', 'start'))
+            self.assertEqual(write.call_count, 1)  # Manifest only; no readiness on failure.
+            names.clear()
+            self.writes.clear()
+            inventory.side_effect = None
+            def fail_readiness(path, value):
+                if path.name == 'upload-ready.json':
+                    raise OSError('readiness write failed')
+                return receipt(path, value)
+            write.side_effect = fail_readiness
+            with self.assertRaisesRegex(OSError, 'readiness write failed'), m.CollectorProgress(1000) as progress:
+                m.curate_upload(1120, 1000, progress)
+            self.assertEqual([(r['phase'], r['event']) for r in self.records()][-1], ('readiness', 'start'))
+            self.assertNotIn(('readiness', 'done'), [(r['phase'], r['event']) for r in self.records()])
+
+    def payload_route(self, corrupt_copy=False):
+        """In-memory capabilities; collection, tar, JSON, curation and inventory stay real."""
+        m = self.module
+        files, metadata, descriptors, events, timed = {}, {}, {}, [], set()
+        closed_outputs = []
+        payload = b'journal-payload-18'
+        root = m.ROOT / 'tmp/dotty-protocol-1'
+        lane = 'protocol-StartFailure'
+        raw = ('=== RUN   TestFocusedProtocolStartFailure\n'
+               '    task_unix_test.go:4164: private protocol evidence: ' + str(root) + '\n'
+               '--- PASS: TestFocusedProtocolStartFailure (0.00s)\n').encode()
+
+        def advance(event, seconds=1):
+            self.assertNotIn(event, timed)
+            timed.add(event)
+            self.clock[0] += seconds
+            events.append((event, self.clock[0]))
+
+        def facts(path, directory=False):
+            if path not in metadata:
+                metadata[path] = SimpleNamespace(
+                    st_dev=1, st_ino=len(metadata) + 1, st_mode=0o40700 if directory else 0o100600,
+                    st_uid=1001, st_gid=1001, st_nlink=1, st_size=0,
+                    st_mtime=1, st_mtime_ns=1000000000, st_ctime_ns=1000000000)
+            return metadata[path]
+
+        def seed(path, data):
+            files[path] = data
+            facts(path).st_size = len(data)
+
+        for directory in (m.ROOT, m.ROOT / 'tmp', root, m.LOGS):
+            facts(directory, True)
+        seed(root / 'start-failure', payload)
+        receipt = {'exit': 0, 'discarded': 0, 'drained': True, 'complete': True,
+                   'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(),
+                   'streams': [len(raw), 0], 'stream_sha256': {
+                       'stdout': hashlib.sha256(raw).hexdigest(), 'stderr': hashlib.sha256(b'').hexdigest()}}
+        for suffix, data in (('log', raw), ('stdout', raw), ('stderr', b''),
+                             ('command.json', b'{}'), ('result.json', json.dumps(receipt).encode())):
+            seed(m.LOGS / (lane + '.' + suffix), data)
+        for name in ('binding', 'context', 'source-before', 'workflow-source',
+                     'source-after-workflow', 'source-after', 'capacity', 'preflight'):
+            seed(m.LOGS / (name + '.json'), b'{}')
+        for name, data in (('main-status.json', b'{"exit":0}'), ('main.exit', b'0\n'),
+                           ('main.stdout', b''), ('main.stderr', b'')):
+            seed(m.LOGS / name, data)
+
+        class Output:
+            # Preserve the external PrivateOutput deadline contract, including close
+            # versus abort; otherwise fake close could invent post-expiry completion.
+            def __init__(self, path, limit, text=False):
+                m.check_collection_deadline()
+                assert path not in files, 'exclusive fake output'
+                self.path, self.limit, self.text = path, limit, text
+                self.closed, self.closed_record = False, None
+                seed(path, b'')
+            def write(self, value):
+                m.check_collection_deadline()
+                data = value.encode() if self.text else bytes(value)
+                assert len(files[self.path]) + len(data) <= self.limit
+                seed(self.path, files[self.path] + data)
+                events.append(('write', self.path, self.clock()))
+                m.check_collection_deadline()
+                return len(value)
+            def clock(self):
+                return owner.clock[0]
+            def tell(self):
+                return len(files[self.path])
+            def flush(self):
+                m.check_collection_deadline()
+            def abort(self):
+                self.closed = True
+            def close(self):
+                if self.closed:
+                    return
+                try:
+                    m.check_collection_deadline()
+                    record = {'bytes': len(files[self.path]),
+                              'sha256': hashlib.sha256(files[self.path]).hexdigest(),
+                              'metadata': m.evidence.export_metadata(facts(self.path))}
+                    if self.path == m.LOGS / 'collector.exit':
+                        advance('capture-exit-close')
+                    elif self.path == m.ROOT / 'upload/journals.tar':
+                        advance('journal-copy-close')
+                    elif self.path == m.ROOT / 'upload/upload-manifest.json':
+                        advance('manifest-close')
+                    elif self.path == m.ROOT / 'upload-ready.json':
+                        advance('readiness-close')
+                    m.check_collection_deadline()
+                finally:
+                    self.abort()
+                self.closed_record = record
+                closed_outputs.append(self.path)
+                events.append(('closed', self.path, self.clock()))
+            def __enter__(self):
+                return self
+            def __exit__(self, *error):
+                if isinstance(error[1], m.CollectionDeadline):
+                    self.abort()
+                else:
+                    self.close()
+        owner = self
+
+        def fd(path):
+            number = 100 + len(descriptors)
+            descriptors[number] = path
+            return number
+
+        def ancestry(path, operation):
+            m.check_collection_deadline()
+            result = mock.MagicMock()
+            result.__enter__.return_value = [(None, None, fd(path))]
+            return result
+
+        def bind():
+            m.check_collection_deadline()
+            advance('bind-' + str(sum(event.startswith('bind-') for event in timed)))
+            return {'ancestry': {}, 'directories': {}}
+
+        def create(name):
+            m.check_collection_deadline()
+            self.assertEqual(name, 'upload')
+            facts(m.ROOT / name, True)
+            m.BOUND_DIRECTORIES[str(m.ROOT / name)] = {}
+            events.append(('create-upload', self.clock[0]))
+
+        def read_private(path, limit):
+            m.check_collection_deadline()
+            if path == m.LOGS / (lane + '.log') and 'log-read' not in timed:
+                advance('log-read')
+            if path == m.ROOT / 'upload/journals.tar' and 'copy-reread' not in timed:
+                advance('copy-reread')
+                if corrupt_copy:
+                    return b'failed copy reread'
+            if path == m.ROOT / 'upload/upload-manifest.json':
+                advance('inventory-manifest-read')
+            self.assertLessEqual(len(files[path]), limit)
+            m.check_collection_deadline()
+            return files[path]
+
+        def scan(number):
+            parent = descriptors[number]
+            result = mock.MagicMock()
+            result.__enter__.return_value = [SimpleNamespace(name=path.name)
+                                             for path in metadata if path.parent == parent]
+            return result
+
+        def open_leaf(name, flags, *, dir_fd):
+            path = descriptors[dir_fd] / name
+            self.assertIn(path, metadata)
+            if path == root:
+                advance('journal-directory-open')
+            return fd(path)
+
+        def read_leaf(number, size):
+            self.assertEqual(descriptors[number], root / 'start-failure')
+            self.assertEqual(size, len(payload))
+            advance('journal-payload-read', 2)
+            return payload
+
+        self.fake.environ = {'CANDIDATE_SHA': '1' * 40, 'GITHUB_RUN_ID': '1', 'GITHUB_RUN_ATTEMPT': '1'}
+        self.fake.geteuid = lambda: 1001
+        for name in ('O_RDONLY', 'O_DIRECTORY', 'O_NOFOLLOW', 'O_NONBLOCK'):
+            setattr(self.fake, name, getattr(os, name))
+        self.fake.scandir = scan
+        self.fake.open = open_leaf
+        self.fake.read = read_leaf
+        self.fake.fstat = lambda number: facts(descriptors[number])
+        self.fake.stat = lambda name, *, dir_fd, follow_symlinks: facts(descriptors[dir_fd] / name)
+        for name, replacement in (('PrivateOutput', Output), ('bind', bind),
+                                  ('trusted_ancestry', ancestry), ('read_private', read_private),
+                                  ('create_private_directory', create)):
+            self.stack.enter_context(mock.patch.object(m, name, replacement))
+        self.stack.enter_context(mock.patch.object(m, 'require_bindings', return_value={}))
+        self.stack.enter_context(mock.patch.object(m, 'TEST_LANES', [lane]))
+        self.stack.enter_context(mock.patch.object(m, 'COMMAND_LANES', [lane]))
+        self.stack.enter_context(mock.patch.object(m.evidence, 'PROTOCOL_ROOT',
+            m.re.escape(str(m.ROOT / 'tmp')) + r'/dotty-protocol-[0-9]+'))
+        for name in ('check_text', 'check_export_records', 'check_fatal_owner_witnesses'):
+            self.stack.enter_context(mock.patch.object(m.evidence, name,
+                side_effect=lambda *args, label=name: advance(label)))
+        self.stack.enter_context(mock.patch.object(m.signal, 'signal'))
+        alarm = self.stack.enter_context(mock.patch.object(m.signal, 'alarm'))
+        def sink(number, wire):
+            events.append(('progress', wire, self.clock[0]))
+            return self.write(number, wire)
+        self.fake.write.side_effect = sink
+        return SimpleNamespace(files=files, payload=payload, root=root, events=events,
+                               closed=closed_outputs, alarm=alarm)
+
+    def test_payload_collection_through_readiness_has_exact_progress_provenance(self):
+        m = self.module
+        fixture = self.payload_route()
+        self.assertEqual(m.collect(capture=True), 0)
+        expected = [
+            ('binding', 'start', 0, 0, 0), ('binding', 'done', 2000, 1, 0),
+            ('logparse', 'start', 2000, 0, 0), ('logparse', 'done', 3000, 1, 0),
+            ('metadata', 'start', 3000, 0, 0), ('metadata', 'done', 4000, 2, 0),
+            ('journalcapture', 'start', 4000, 0, 0), ('journalcapture', 'done', 6000, 2, 18),
+            ('strictconsumers', 'start', 6000, 0, 0), ('strictconsumers', 'done', 9000, 5, 0),
+            ('captureclosure', 'start', 9000, 0, 0), ('captureclosure', 'done', 10000, 1, 0),
+            ('curation', 'start', 10000, 0, 0), ('curation', 'done', 14000, 24, 0),
+            ('finalinventory', 'start', 14000, 0, 0), ('finalinventory', 'done', 15000, 25, 0),
+            ('readiness', 'start', 15000, 0, 0), ('readiness', 'done', 16000, 1, 0)]
+        self.assertEqual([(r['phase'], r['event'], int(r['elapsed_ms']), int(r['units']), int(r['bytes']))
+                          for r in self.records()], expected)
+        self.assertEqual(len(fixture.payload), 18)
+        copies = [path for path in fixture.closed if path.parent == m.ROOT / 'upload'
+                  and path.name != 'upload-manifest.json']
+        self.assertEqual(len(copies), 24)
+        for copy in copies:
+            self.assertEqual(fixture.files[copy], fixture.files[m.LOGS / copy.name])
+        inventory = [json.loads(line) for line in fixture.files[m.LOGS / 'journal-inventory.jsonl'].splitlines()]
+        captured = [item['captured'] for item in inventory if 'captured' in item]
+        self.assertEqual(len(captured), 2)
+        self.assertEqual(captured[1]['payload'], m.evidence.export_encoded(fixture.payload))
+        with tarfile.open(fileobj=io.BytesIO(fixture.files[m.ROOT / 'upload/journals.tar']), mode='r:') as archive:
+            self.assertEqual(archive.extractfile('journals/dotty-protocol-1/start-failure').read(), fixture.payload)
+        ready = json.loads(fixture.files[m.ROOT / 'upload-ready.json'])
+        self.assertEqual((ready['started'], ready['deadline']), (1000, 1120))
+        self.assertEqual(len(ready['files']), 25)
+        self.assertEqual(fixture.events[-2][0:2], ('closed', m.ROOT / 'upload-ready.json'))
+        self.assertEqual(fixture.events[-1][0], 'progress')
+        self.assertIn(b'phase=readiness event=done', fixture.events[-1][1])
+        self.assertNotIn(fixture.payload, b''.join(wire for _, wire, _ in self.writes))
+        self.assertEqual(fixture.files[m.LOGS / 'collector.stdout'], b'')
+        self.assertEqual(fixture.files[m.LOGS / 'collector.stderr'], b'')
+        self.assertEqual(fixture.alarm.call_args_list, [mock.call(120), mock.call(0)])
+        self.assertEqual(self.fake.close.call_args_list.count(mock.call(91)), 1)
+
+    def test_failed_copy_reread_never_earns_curation_or_readiness_completion(self):
+        m = self.module
+        fixture = self.payload_route(corrupt_copy=True)
+        with mock.patch.object(m.sys, 'stderr', io.StringIO()) as stderr:
+            self.assertEqual(m.collect(capture=True), 1)
+        self.assertIn('upload copy drift', stderr.getvalue())
+        self.assertEqual([(r['phase'], r['event']) for r in self.records()],
+                         [(phase, event) for phase in m.COLLECTOR_PHASES[:6] for event in ('start', 'done')]
+                         + [('curation', 'start')])
+        journal = next(r for r in self.records() if r['phase'] == 'journalcapture' and r['event'] == 'done')
+        self.assertEqual((journal['units'], journal['bytes'], journal['elapsed_ms']), ('2', '18', '6000'))
+        self.assertEqual(self.clock[0], 1013)
+        self.assertEqual(len([path for path in fixture.closed if path.parent == m.ROOT / 'upload']), 24)
+        self.assertNotIn(m.ROOT / 'upload/upload-manifest.json', fixture.files)
+        self.assertNotIn(m.ROOT / 'upload-ready.json', fixture.files)
+
+    def test_sink_write_expiry_preserves_silent_unwind_and_single_owned_close(self):
+        m = self.module
+        # Separate in-memory fixtures, never retry an existing collection namespace.
+        for outcome in ('short', 'oserror', 'deadline'):
+            with self.subTest(outcome=outcome), ExitStack() as isolated:
+                original_stack = self.stack
+                self.stack = isolated
+                self.clock[0] = 1000
+                self.writes.clear()
+                self.fake.close.reset_mock()
+                self.fake.write.reset_mock()
+                retained = {}
+                fixture = self.payload_route()
+                sink = self.fake.write.side_effect
+                def expire(number, wire):
+                    result = sink(number, wire)
+                    if b'phase=captureclosure event=start ' in wire:
+                        retained.update(fixture.files)
+                        self.clock[0] = 1120
+                        if outcome == 'short':
+                            return 1
+                        if outcome == 'oserror':
+                            raise OSError(errno.EIO, 'must not be rendered')
+                        raise m.CollectionDeadline('must not be rendered')
+                    return result
+                self.fake.write.side_effect = expire
+                try:
+                    with mock.patch.object(m.sys, 'stderr', io.StringIO()) as stderr:
+                        self.assertEqual(m.dispatch_cli('collect'), 1)
+                    self.assertEqual(stderr.getvalue(), '')
+                    self.assertTrue(retained)
+                    self.assertEqual(fixture.files, retained)
+                    self.assertEqual([(r['phase'], r['event']) for r in self.records()][-1],
+                                     ('captureclosure', 'start'))
+                    self.assertTrue(all(at < 1120 for _, _, at in self.writes))
+                    self.assertNotIn(m.LOGS / 'collector.exit', fixture.files)
+                    self.assertNotIn(m.LOGS / 'collector.stdout', fixture.closed)
+                    self.assertNotIn(m.LOGS / 'collector.stderr', fixture.closed)
+                    self.assertFalse(any(event[0] == 'create-upload' for event in fixture.events))
+                    self.assertNotIn(m.ROOT / 'upload-ready.json', fixture.files)
+                    self.assertEqual(self.fake.close.call_args_list.count(mock.call(91)), 1)
+                    self.assertEqual(fixture.alarm.call_args_list, [mock.call(120), mock.call(0)])
+                finally:
+                    self.stack = original_stack
+
+    def test_policy_constructs_private_set_once_per_call_with_same_closed_roles(self):
+        m = self.module
+        private = {m.ROOT} | {m.ROOT / name for name in (*m.PRIVATE.values(), 'evidence', 'compile', 'upload')}
+        roles = {'create-root': {m.ROOT.parent}, 'create-private': {m.ROOT},
+                 'bind': private, 'output': private, 'read': private,
+                 'source-inventory': {m.WORK}, 'preflight': {m.ROOT / 'tmp'},
+                 'export': {m.LOGS, m.ROOT / 'upload'}, 'publish': {m.ROOT},
+                 'github-env': {m.ROOT.parent / '_runner_file_commands'},
+                 'collector': {m.ROOT / 'tmp'}, 'upload': {m.ROOT / 'upload'}}
+        original = m.private_directories
+        with mock.patch.object(m, 'private_directories', wraps=original) as construct:
+            for role, endpoints in roles.items():
+                for endpoint in endpoints:
+                    construct.reset_mock()
+                    self.assertEqual(m.directory_endpoint(role, endpoint), private | {
+                        m.ROOT.parent, m.ROOT.parent / '_runner_file_commands', endpoint})
+                    construct.assert_called_once_with()
+                with self.assertRaisesRegex(AssertionError, '^directory endpoint mismatch:'):
+                    m.directory_endpoint(role, m.ROOT / 'unapproved')
+            with self.assertRaisesRegex(AssertionError, '^unknown directory operation$'):
+                m.directory_endpoint('waiver', m.ROOT)
+            # No durable cache: changing pure path inputs is observed on the next call.
+            with mock.patch.object(m, 'ROOT', Path('/different')):
+                self.assertIn(Path('/different'), m.directory_endpoint('bind', Path('/different')))
+
+
 class NativeCIPortabilityTests(unittest.TestCase):
     def test_mise_test_tasks_set_private_umask_before_unchanged_arguments(self):
         # Source-only regression: no shell execution or native capability claim.

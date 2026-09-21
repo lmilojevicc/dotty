@@ -249,10 +249,11 @@ def private_directories():
 
 def directory_endpoint(operation, endpoint):
     """Closed harness operations; neither binding JSON nor CLI supplies a waiver."""
+    private = private_directories()
     endpoints = {
         'create-root': {ROOT.parent}, 'create-private': {ROOT},
-        'bind': private_directories(), 'output': private_directories(),
-        'read': private_directories(), 'source-inventory': {WORK},
+        'bind': private, 'output': private,
+        'read': private, 'source-inventory': {WORK},
         'preflight': {ROOT / 'tmp'}, 'export': {LOGS, ROOT / 'upload'},
         'publish': {ROOT}, 'github-env': {ROOT.parent / '_runner_file_commands'},
         'collector': {ROOT / 'tmp'}, 'upload': {ROOT / 'upload'},
@@ -260,7 +261,7 @@ def directory_endpoint(operation, endpoint):
     assert operation in endpoints, 'unknown directory operation'
     assert endpoint in endpoints[operation], 'directory endpoint mismatch: ' + operation + ': ' + str(endpoint)
     assert endpoint.is_absolute() and '..' not in endpoint.parts, 'unsafe ancestor path'
-    return private_directories() | {ROOT.parent, ROOT.parent / '_runner_file_commands', endpoint}
+    return private | {ROOT.parent, ROOT.parent / '_runner_file_commands', endpoint}
 
 
 def ancestor_policy(fd, path, operation, endpoint):
@@ -1018,7 +1019,70 @@ class CollectionDeadline(Exception):
     """Fatal deadline, deliberately not an OSError caught by per-entry retention."""
 
 
-def capture_stage(label, operation):
+COLLECTOR_PHASES = ('binding', 'logparse', 'metadata', 'journalcapture',
+                    'strictconsumers', 'captureclosure', 'curation',
+                    'finalinventory', 'readiness')
+COLLECTOR_PROGRESS_RECORDS = 18
+COLLECTOR_PROGRESS_RECORD_BYTES = 256
+COLLECTOR_PROGRESS_BYTES = 4608
+
+
+class CollectorProgress:
+    """Bounded console observations, never evidence or publication authority."""
+    def __init__(self, started):
+        self.started = started
+        self.fd = None
+        self.failed = False
+        self.disabled = False
+        self.seen = set()
+        self.written = 0
+
+    def __enter__(self):
+        check_collection_deadline()
+        try:
+            self.fd = os.dup(2)  # Owned original Actions stderr, before capture redirection.
+        except OSError:
+            self.failed = self.disabled = True
+        return self
+
+    def mark(self, phase, event, units=0, byte_count=0):
+        check_collection_deadline()
+        if self.disabled:
+            return
+        if (phase not in COLLECTOR_PHASES or event not in ('start', 'done')
+                or type(units) is not int or not 0 <= units <= 20000
+                or type(byte_count) is not int or not 0 <= byte_count <= 96 * 1024**2
+                or (phase, event) in self.seen
+                or len(self.seen) >= COLLECTOR_PROGRESS_RECORDS):
+            self.failed = self.disabled = True
+            return
+        elapsed = min(119999, max(0, int((time.monotonic() - self.started) * 1000)))
+        wire = (f'collector-progress phase={phase} event={event} elapsed_ms={elapsed} '
+                f'units={units} bytes={byte_count}\n').encode('ascii')
+        if (len(wire) > COLLECTOR_PROGRESS_RECORD_BYTES
+                or self.written + len(wire) > COLLECTOR_PROGRESS_BYTES):
+            self.failed = self.disabled = True
+            return
+        self.seen.add((phase, event))
+        self.written += len(wire)  # Charge attempted bytes, including a short write.
+        check_collection_deadline()  # No emission on expiry, including during formatting.
+        try:
+            if os.write(self.fd, wire) != len(wire):
+                self.failed = self.disabled = True
+        except OSError:
+            self.failed = self.disabled = True
+
+    def __exit__(self, *error):
+        fd, self.fd = self.fd, None
+        self.disabled = True
+        if fd is not None:
+            try:
+                os.close(fd)  # Once only; ambiguous close errors must not cause a retry.
+            except OSError:
+                self.failed = True  # Never mask the primary exception, especially expiry.
+
+
+def capture_stage(label, operation, progress=None):
     """No shell redirection: refusal leaves unsafe names untouched and logs missing."""
     status = 1
     try:
@@ -1028,6 +1092,8 @@ def capture_stage(label, operation):
             with redirect_stdout(out), redirect_stderr(err):
                 try:
                     status = operation() or 0
+                    if progress is not None and status == 0:
+                        progress.mark('captureclosure', 'start')
                 except CollectionDeadline:
                     raise
                 except CommandFailure as error:
@@ -1041,6 +1107,8 @@ def capture_stage(label, operation):
         check_collection_deadline()
         with PrivateOutput(LOGS / (label + '.exit'), 16, text=True) as stream:
             stream.write(str(status) + '\n')
+        if progress is not None and status == 0:
+            progress.mark('captureclosure', 'done', 1)
     except CollectionDeadline:
         raise
     except Exception as error:
@@ -1124,12 +1192,14 @@ def upload_inventory(expected_names, deadline=None):
     return records
 
 
-def curate_upload(deadline=None, started=None):
+def curate_upload(deadline=None, started=None, progress=None):
     """Copy only completed read observations; rejected leaves remain working-only.
 
     Current checks are not a permanent snapshot against later external writers.
     Missing manifest or namespace drift means incomplete curation, never acceptance.
     """
+    if progress is not None:
+        progress.mark('curation', 'start')
     if deadline is not None:
         publication_time(started, deadline)
     assert UPLOAD_ENV not in os.environ, 'preexisting upload publication marker'
@@ -1201,14 +1271,23 @@ def curate_upload(deadline=None, started=None):
             'boundary': 'validated observations only; later races or unavailable inputs require refusal'})
         require_bindings(outputs, 'export')
         assert output_names(outputs[-1][2]) == set(expected), 'upload namespace drift'
+        if progress is not None:
+            progress.mark('curation', 'done', len(records))
+            progress.mark('finalinventory', 'start')
         assert upload_inventory(expected, deadline) == expected, 'upload writer baseline drift'
+        if progress is not None:
+            progress.mark('finalinventory', 'done', len(expected))
         # Readiness is separate from uploaded files and exists only after safe curation.
         # Rejected input leaves may produce a sound partial inventory, never their bytes.
         if deadline is not None:
+            if progress is not None:
+                progress.mark('readiness', 'start')
             publication_time(started, deadline)
             write_json(ROOT / 'upload-ready.json', {
                 'context': publication_context(), 'started': started, 'deadline': deadline,
                 'directory': BOUND_DIRECTORIES[str(destination)], 'files': expected})
+            if progress is not None:
+                progress.mark('readiness', 'done', 1)
     return 1 if refusals else 0
 
 
@@ -1269,18 +1348,23 @@ def collect(capture=False):
     try:
         if not capture:
             return collect_evidence()
-        status = capture_stage('collector', collect_evidence)
-        check_collection_deadline()
-        try:
-            curated = curate_upload(end, started)
-            status = status or curated
-        except CollectionDeadline:
-            raise
-        except Exception as error:
+        with CollectorProgress(started) as progress:
+            progress.mark('binding', 'start')
+            status = capture_stage('collector', lambda: collect_evidence(progress), progress)
+            if status:
+                progress.disabled = True  # No progress after a captured primary failure.
             check_collection_deadline()
-            print('INCOMPLETE upload curation: ' + str(error), file=sys.stderr)
-            status = status or 1
-        return status
+            try:
+                curated = curate_upload(end, started, progress)
+                status = status or curated
+            except CollectionDeadline:
+                raise
+            except Exception as error:
+                check_collection_deadline()
+                print('INCOMPLETE upload curation: ' + str(error), file=sys.stderr)
+                status = status or 1
+        check_collection_deadline()
+        return status or int(progress.failed)  # Includes owned-sink close failure.
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous)
@@ -1298,8 +1382,11 @@ def collection_archive(stream):
         archive.closed = True  # Exceptional unwinding/destruction must not add a footer.
 
 
-def collect_evidence():
+def collect_evidence(progress=None):
     binding = bind()
+    if progress is not None:
+        progress.mark('binding', 'done', 1)
+        progress.mark('logparse', 'start')
     logs, issues, entries, symlinks = [], [], [], []
     for lane in TEST_LANES:
         path = LOGS / (lane + '.log')
@@ -1312,7 +1399,11 @@ def collect_evidence():
     protocol_logs = [(lane, text) for lane, text in logs if lane in evidence.PROTOCOL_LANES + ['verify']]
     roots, attribution = evidence.diagnostic_root_roles(protocol_logs)
     issues.extend(attribution)
+    if progress is not None:
+        progress.mark('logparse', 'done', len(logs))
+        progress.mark('metadata', 'start')
     total = 0
+    captured_units = captured_bytes = 0
     exhausted = False
     hardlinks = {}
     limits = evidence.EXPORT_LIMITS
@@ -1464,6 +1555,9 @@ def collect_evidence():
                         issues.append('unresolved journal hardlinks: ' + repr(paths) + '; permitted names=' + str(len(aliases)) + '; nlink=' + str(first.st_nlink))
                         emit({'refusal': issues[-1]})
                 revalidate_nodes()
+                if progress is not None:
+                    progress.mark('metadata', 'done', len(nodes))
+                    progress.mark('journalcapture', 'start')
                 for parent, name, st, record, permitted in nodes:
                     if not permitted:
                         continue
@@ -1509,6 +1603,8 @@ def collect_evidence():
                         entries.append(record)
                         emit({'captured': record})
                         assert evidence.export_metadata(os.stat(name, dir_fd=parent, follow_symlinks=False)) == record['metadata'], 'entry binding drift'
+                        captured_units += 1
+                        captured_bytes += len(payload) if payload is not None else 0
                     except (OSError, AssertionError) as error:
                         issues.append(root + '/' + relative + ': ' + str(error))
                         emit({'refusal': issues[-1]})
@@ -1518,6 +1614,10 @@ def collect_evidence():
                     os.close(child)
             assert names(tmp) == namespace, 'temporary namespace drift'
             check_anchors()
+    if progress is not None:
+        progress.mark('journalcapture', 'done', captured_units, captured_bytes)
+        progress.mark('strictconsumers', 'start')
+    consumers = 0
     # Report missing individual records even when the native command itself failed.
     missing = []
     for root, role in roots.items():
@@ -1555,17 +1655,24 @@ def collect_evidence():
             raw = read_private(LOGS / (lane + '.' + suffix), evidence.OUTPUT_LIMIT)
             assert len(raw) == receipt['streams'][index], 'command stream size mismatch: ' + lane + '.' + suffix
             assert hashlib.sha256(raw).hexdigest() == receipt['stream_sha256'][suffix], 'command stream hash mismatch: ' + lane + '.' + suffix
+        consumers += 1
     for lane, text in logs:
         receipt = json.loads(read_private(LOGS / (lane + '.result.json'), 4096))
         assert receipt['exit'] == receipt['discarded'] == 0 and receipt['drained']
         assert receipt['sha256'] == hashlib.sha256(text.encode()).hexdigest()
         evidence.check_text(text, lane)
+        consumers += 1
     strict_roots = evidence.protocol_root_roles(protocol_logs)
     assert roots == strict_roots, 'strict/diagnostic root mismatch'
+    consumers += 1
     evidence.check_export_records(strict_roots, entries)
+    consumers += 1
     evidence.check_fatal_owner_witnesses(strict_roots, entries)
+    consumers += 1
     write_json(LOGS / 'collection-checks.json', {'complete': True, 'native_acceptance': False,
                                               'requires': 'download and independent exact-candidate artifact audit'})
+    if progress is not None:
+        progress.mark('strictconsumers', 'done', consumers)
     return 0
 
 

@@ -8,7 +8,7 @@ refuses the historically observed `/home` default ACL, assuming earlier checks p
 `_test.go` fixtures; complete physical topology checks remain. These cutoffs are
 not imported into the CI harness, and production refusal cases remain required.
 
-Both authorized CI attempts are consumed (35548268496 and diagnostic 35551465637).
+The earlier CI attempts 35548268496 and diagnostic 35551465637 are consumed.
 The latter saved six directories: `/home` was root-owned 0755 with absent access
 ACL and present default ACL; lower existing directories through `_temp` and
 `_runner_file_commands` had both attributes absent. Those are historical facts,
@@ -16,6 +16,81 @@ not current authority, admission by bytes/UID/path, or evidence of native succes
 A default ACL governs creation in its immediate parent, not existing lower
 objects. The helper therefore requires the actual creation parent to be strict;
 it never creates directly in an admitted higher default-bearing directory.
+
+## Collector follow-up — source prepared, not performance evidence
+
+Run **35603980436** subsequently passed the native command step and routine 110
+helper regressions, but collection exited silently after about 120.084 seconds.
+Publication refused missing readiness; no artifacts were available. Expiry is
+strongly consistent with this observation, but the phase/hotspot remains unknown.
+Command-step success is not independently audited native acceptance.
+
+This follow-up computes the pure private-directory set once per
+`directory_endpoint` call instead of four times. The closed operation map, strict
+set (including intermediates), errors and all live ACL, descriptor/name, identity,
+nofollow and privacy checks are unchanged. No filesystem authority is cached.
+There is **no measured performance improvement or claim that this fixes expiry**.
+
+Captured collection now emits console-only `collector-progress` records through
+an owned duplicate of original FD2, established before private stream redirection.
+Capture payloads still go only to their original private destinations. Fixed phase
+labels are `binding`, `logparse`, `metadata`, `journalcapture`, `strictconsumers`,
+`captureclosure`, `curation`, `finalinventory`, and `readiness`. Each has at most
+one `start` and one `done` record: **18 records total, 256 bytes per record, 4608
+bytes total**, including attempted short writes. Records contain only the fixed
+labels/events and bounded numeric elapsed milliseconds, units and bytes; no paths,
+root names, payloads or exception text. Elapsed milliseconds are bounded to
+0–119999, units to 0–20000, and bytes to 0–96 MiB. There is no per-entry logging,
+background timer/thread, retry or fallback file.
+
+A `start` reports phase entry, not completion. `done` follows that phase's work:
+binding counts one completed bind; logparse counts successfully read/decoded logs;
+metadata counts observed nodes after traversal and revalidation (including refused
+observations); journalcapture counts entries whose capture and post-write binding
+check finished, with payload bytes for those entries (including hardlink aliases).
+Strict-consumer units count completed command-receipt bundles, transcript checks,
+and the root comparison/export/FatalOwner checks. Captureclosure counts one closed
+capture plus exit receipt; curation counts closed copies after rereads and manifest
+creation; finalinventory counts compared files including the manifest; readiness
+counts one completed readiness write. These are work observations, **not PASS,
+acceptance, publication authority or proof of complete native evidence**. A failed
+phase has no earned `done` record. No final summary is emitted during unwinding.
+
+The original shared **120-second** collection/curation/publication allowance starts
+before sink setup and is unchanged. Deadline guards precede each emission;
+`CollectionDeadline` still unwinds silently and nonzero, without post-expiry output,
+footer, receipt or new write. Only the owned sink descriptor is closed, once, also
+on failure. Duplication, write, short-write or close errors disable diagnostics and
+force an otherwise successful collection nonzero; existing primary failures remain
+primary. No diagnostic retry occurs. Captured collector failure suppresses further
+progress while existing safe curation behavior is retained. Direct uncaptured
+`collect()` remains non-diagnostic. Blocking OS operations and scheduling remain
+outside a hard Python wall-clock guarantee.
+
+Current prepared inventory: **125 definitions = 110 unchanged purposes + 15 new
+portable fake regressions** (114 in `test_native_ci.py`, 11 unchanged parser tests;
+68 Linux-dependent, 57 portable overall). Existing silent-expiry assertions needed
+no adaptation: pre-expiry progress bypasses redirected private streams, while all
+post-expiry no-output/no-write purposes remain unchanged. New cases cover label and
+byte/record/counter bounds, original-sink routing during real capture redirection,
+expiry before setup/emission and silent captured unwind, diagnostic errors and FD
+ownership, primary-status preservation, actual collector/curation phase wiring,
+consumer/readiness noncompletion, and once-per-call pure construction with the same
+closed roles. The coverage follow-up adds a specified 18-byte journal payload and
+24 curated copies through actual `collect(capture=True)`, capture, collection and
+curation, retaining real JSON writes, tar construction and final upload inventory.
+It asserts all 18 phase records in exact order with operation-driven elapsed values,
+nonzero journal/copy counts and readiness completion only after its writer closes.
+A failed copy reread earns no curation/final-inventory/readiness completion. Sink
+writes that reach expiry then return short, raise OSError or raise CollectionDeadline
+must unwind silently without new private completion, curation or another emission;
+only the owned diagnostic FD is closed once. In-memory writer capabilities retain
+the real deadline guards and abort-versus-close contract. The helper itself needed
+no change for these coverage additions. All new assertions are **UNRUN**; AST
+preparation is not execution or native evidence.
+Parent owns authorized checks, Git, publication and the one new hosted attempt;
+independent review and exact-candidate evidence audit remain required. Production,
+consumers, workflow, mise tasks, native cases and ESRCH supervision are untouched.
 
 ## Prepared directory-role policy
 
@@ -66,7 +141,7 @@ by the restored workflow. Its observation/byte budgets and no-progression behavi
 are unchanged. The diagnostic routing regression now asserts the restored route
 and exact workflow hash, rather than claiming the diagnostic is still selected.
 
-Prepared inventory: **110 definitions = 98 retained purposes + 12 new portable
+Prior role-policy inventory: **110 definitions = 98 retained purposes + 12 new portable
 role-policy definitions** (99 in test_native_ci.py, 11 unchanged parser definitions).
 The Linux test-only host-ancestry cutoff only adapts to the policy signature; it
 never becomes CI policy. New fake-descriptor tests cover higher default-only
@@ -78,9 +153,9 @@ including source checkpoints, preflight, collector and upload. Source wiring is
 not dynamic coverage of every end-to-end caller. No prepared test was imported or
 executed. Counts describe definitions, not passing tests or native gates.
 
-Remaining gates: independent source/control review; separate authorization for
+Remaining gates for this follow-up: independent source/control review; parent-owned
 local mise checks, portable/Linux helper tests and real verification; parent
-publication and exact-candidate execution approval with fresh target checks;
+publication and the authorized exact-candidate attempt with fresh target checks;
 then complete downloaded evidence and independent bounded-fixture audit. Neither
 local success nor a green future workflow alone accepts Task34/33a or completes M1.
 No readiness claim, new attempt, ACL mutation, sudo, signal, resource or cleanup
