@@ -1,0 +1,178 @@
+# Coordination authority — slice 31 implementation/test contract
+
+**NONNORMATIVE · 31a/31b/31c accepted · Production-unused.** This records the accepted scope and limits of oracle `9ab9a37a` and follow-up `71110014`, within the continuing full-plan authorization. The [31a receipt](lifecycle-implementation-plan.md#milestone-1-authority-facts-and-security-readers-31a-acceptance-receipt) accepts exact code `9504a628473d2c2287bf64ce53262e3c727e2dea` with bounded Darwin and Linux evidence. The separate [31b receipt](lifecycle-implementation-plan.md#milestone-1-private-createopen-31b-acceptance-receipt) accepts private create/open at `5735f31764c0a9bf6c818b5c2f1ad9337370ab41` within its bounded native scope. The [31c receipt](lifecycle-implementation-plan.md#milestone-1-filedirectory-flock-31c-acceptance-receipt) separately accepts file/directory flock at `b1c9565df245cb46bcae60f8e35dbf8965464333` within its bounded native scope. These receipts do not accept coordinator32, Milestone 1, production integration, or a product-semantics change. [CONTEXT.md](../../CONTEXT.md) owns product semantics; [ADR 0006](../adr/0006-use-a-user-scoped-mutation-lock.md) and [ADR 0007](../adr/0007-use-anchored-filesystem-mutations.md) own coordination and anchored authority. The [lifecycle plan](lifecycle-implementation-plan.md#first-serial-slices) owns delivery order and wider gates.
+
+Slice 31 extends the accepted native-handle boundary with authority facts, private create/open, and file/directory flock primitives. Slice 32, the canonical coordinator, follows only after these serial gates and remains production-unused initially. No caller, persistence, transaction, CLI, or release migration belongs here.
+
+## Facts and policy boundary
+
+- `Identity` remains device/inode/kind identity, not permission or deletion authority. Separate `AuthorityFacts` carry descriptor-observed UID, GID, permission and special bits, link count, filesystem/mount facts, and explicit security-evidence state. Zero/uninitialized evidence is invalid, never verified absence.
+- Only descriptor-bound **verified ACL absence** is supported in this slice. Any present ACL, including deny-only or inheritance-bearing ACLs, refuses; unknown, unreadable, malformed, or unsupported evidence refuses. This is a bounded capability, not general ACL evaluation or relocation fidelity.
+- Linux uses `Fgetxattr` for POSIX access ACLs and directory default ACLs. Only `ENODATA` on the approved descriptor-verified ext/tmpfs model establishes absence. `EOPNOTSUPP` is unsupported, not absence. NFS, CIFS, FUSE, overlay, and unknown filesystems refuse; read-only overlay gets no exception.
+- Darwin supports local APFS with ownership enforcement proven. A small `darwin && cgo` libc adapter uses `acl_get_fd_np`, entry inspection, validation, deferred-inheritance inspection, and `acl_free`. Only NULL/ENOENT triggers independent same-held-fd `fgetattrlist` required-extended-security confirmation, described below; all failures fail closed. `darwin && !cgo` is unsupported. No new dependency, private linkname, handwritten raw ABI, or command-output parsing supplies security evidence.
+- Release builds remain `CGO_ENABLED=0`. **Production Darwin integration is BLOCKED until build policy is resolved.** Native cgo evidence cannot establish production release support.
+
+| Role | Required authority |
+| --- | --- |
+| Private anchor directory | Effective UID; exact `0700`, no special bits; supported filesystem/mount/security evidence |
+| Lock file | Effective UID; regular file; exact `0600`, no special bits; `nlink == 1`; supported evidence |
+| Dotfiles Repository directory | Effective UID; no group/other write or special bits; supported evidence |
+| System ancestors | Validation only under the full ancestry policy, including ADR 0006's expected root-owned sticky temporary root; never impose private-anchor mode on system ancestors, repair them, or flock `/` or the temporary root |
+
+Role policy and identity/topology guards belong **inside operations**, not in an optional caller preflight. Revalidate before lock waiting and after acquisition, before returning authority; observable ownership, mode, ACL, mount, pathname, or ancestry drift refuses.
+
+## Creation and lease limits
+
+Existing objects are never repaired, truncated, or removed. Opens use no-follow, non-truncating flags; creation uses genuine exclusivity. An exclusively created file descriptor may establish its mode only after security binding. This exception never authorizes chmod of an existing object or a newly observed race winner.
+
+Successful `mkdir` records a creation event, not proof of ownership of a subsequently opened inode. Under a restrictive umask, refuse an unusable directory and retain/report the creation when identity/authority cannot be proven; do not chmod it, change process-global umask, or delete it speculatively. Creation records retain exact paths and available observations for recovery, **not deletion authority**. Errors distinguish pre-creation refusal from retained/uncertain creation and give safe recovery guidance rather than claiming no changes.
+
+Each lock acquisition uses an independent open file description, not a duplicated/shared description masquerading as another lease. Waiting uses context-aware nonblocking flock, handles contention and `EINTR`, and stops on cancellation. Closing cancels waiters; an already returned lease pins its descriptor and ancestry until concurrency-safe release. Unlock and close are each attempted once, with errors joined and preserved; this layer does not classify them into C4 outcomes.
+
+## Accepted test boundary
+
+Use only a **test-only private authority root**: no CLI flag, environment/config override, or exported alternate production entrypoint. Linux positive fixtures verify the actual root descriptor's ext/tmpfs filesystem and real UID/mode/ACL evidence at that root and below; Darwin positive fixtures analogously require native ownership-enforced local APFS evidence. Do not synthesize positive filesystem or security facts.
+
+Only the test security-ancestry boundary is cut above that root. Every native identity and topology guard still covers full ancestry. Production always checks full security ancestry. Keep a separate unbounded-production-policy refusal track, including unsupported overlay, without touching the host canonical anchor. Negative injected-reader cases supplement, not replace, native evidence.
+
+Report these results as **bounded integration**, not canonical CLI coverage. Record Darwin native cgo ACL evidence separately; `!cgo` and foreign-target compile results establish limits only. Later positive unmodified CLI coverage needs an appropriate environment and its own gate. No host canonical-anchor adversarial fixtures or VM execution are approved.
+
+## Serial slices and named required cases
+
+The names below are planned maintained required-case identifiers, not existing test claims. Common cases must execute on **each native OS**; platform-specific cases must execute on the named native OS. Declare exact leaf inventories before source edits, and fail the gate on missing/skipped required cases. Fixtures stay private; umask variations run in isolated subprocesses, never by changing the test runner's global umask. Inspect raw open/creation flags and pre/post state; do not repair fixtures after the operation to make assertions pass.
+
+| Gate | Common required cases on Linux and Darwin |
+| --- | --- |
+| 31a — facts/security readers | `ZeroEvidenceInvalid`; `IdentityNotAuthority`; `DescriptorFactsUIDGIDModeSpecialNlink`; `RolePolicyMatrix`; `ACLAbsentVerified`; `ACLPresentRefused`; `ACLReadFailureRefused`; `FilesystemMountUnknownRefused`; `SecurityDriftSameInode`; `FullIdentityTopologyAncestry`; `PrivateSecurityBoundaryOnly`; `UnboundedProductionPolicyRefusal` |
+| 31b — private create/open, after 31a | `ExclusiveFileModeAfterSecurityBinding`; `ExistingObjectNeverRepairedTruncatedRemoved`; `RawOpenFlags`; `ExistingSymlinkWrongTypeOwnerModeSpecialRefused`; `LockHardlinkRefused`; `CreateCollisionWinnerUntouched`; `MkdirCreationNotInodeOwnership`; `PostCreateReplacementRefused`; `RestrictiveUmaskDirectoryRetained`; `CreationRecordNoDeleteAuthority`; `ExactRecoveryPaths`; `SystemAncestorsValidationOnly` |
+| 31c — file/directory flock, after 31b | `FileLockSerializesProcesses`; `DirectoryLockSerializesProcesses`; `IndependentDescriptionPerLease`; `ContentionCancellation`; `EINTRRetryAndCancellation`; `CloseCancelsWaiters`; `ReturnedLeasePinsAncestry`; `ConcurrentReleaseOnce`; `UnlockCloseErrorsJoined`; `FailedAcquisitionReleasesResources`; `PreWaitPolicyDrift`; `PostWaitPolicyIdentityTopologyDrift`; `UnsupportedFlockRefused`; `NoSystemAncestorFlock`; `NoC4Classification` |
+
+Platform-specific 31a inventory:
+
+- **Linux:** `PosixAccessENODATA`; `DirectoryDefaultENODATA`; `AccessACLPresentRefused`; `DefaultACLPresentRefused`; `EOPNOTSUPPNotAbsence`; `DescriptorExtTmpfsVerified`; `NfsCifsFuseOverlayUnknownRefused`; `ReadonlyOverlayStillRefused`.
+- **Darwin/cgo:** `LocalAPFSOwnershipEnforced`; `OwnershipDisabledRefused`; `NaturalDirectoryACLAbsentConfirmed`; `NaturalRegularFileACLAbsentConfirmed`; `AllocatedEmptyACLNoEntriesVerified`; `ACLGetterConfirmationDispatch`; `RequiredACLConfirmationErrorsRefused`; `RequiredACLConfirmationMalformedRefused`; `AllowACLRefused`; `DenyOnlyACLRefused`; `InheritedACLRefused`; `DeferredInheritanceRefused`; `ACLValidationFailureRefused`; `ACLAllocationFreedOnAllPaths`.
+- **Capability-limit lane:** `DarwinNoCgoUnsupported` and foreign-target unsupported compilation. These never substitute for Darwin/cgo native cases.
+
+Each gate requires independent source/integrity and test review, clean-environment `mise run verify` and `mise run vuln`, and non-skipped native required-case evidence with exact candidate, OS/architecture, filesystem/mount/security facts, build mode, executed leaves, and outcomes. Distinguish real native cases from injected failures and compile-only evidence. An unavailable required environment blocks acceptance; do not silently skip, weaken policy, or reuse old evidence. Only after 31c acceptance may unused coordinator slice 32 begin; production integration still requires the lifecycle plan's release-outcome and isolation readiness.
+
+## 31a implementation handoff — historical preparation
+
+The following handoff records pre-acceptance implementation and validation planning. Its pending-gate and launcher-availability statements are historical, superseded by the [31a acceptance receipt](lifecycle-implementation-plan.md#milestone-1-authority-facts-and-security-readers-31a-acceptance-receipt). Mechanism limits still apply; no acceptance transfers to 31b or 31c.
+
+The serial-gate handoff implements **31a only**: immutable authority facts, descriptor filesystem/ACL readers, role policy, and a leased `Dir.Authority` observation that validates full production ancestry twice with the existing physical identity/topology guards. It does not authorize a later operation from saved facts. `Identity` remains unchanged. The native-handle inventory retains all 40 leaves; its private-API assertion additionally permits `Authority`.
+
+The required 31a inventories and their test implementations were written before production source edits. `TestAuthorityBoundary` declares the 12 common leaves, `TestLinuxAuthority` the eight Linux leaves, and `TestDarwinAuthority` the 14 Darwin/cgo required cases. Each aggregator rejects missing, duplicate, skipped, filtered, or incomplete leaves. `TestDarwinNoCgoUnsupported` is a separate native capability-limit gate; foreign-target tests remain compile-only. No tests or commands were run by the implementation worker, so neither a red-before-fix run nor passing evidence is claimed.
+
+The private security-boundary harness exists only in `_test.go`; it calls the same unexported observers and role policy while preserving full physical guards, including ancestors above its boundary. Native positive fixtures must establish actual ext/tmpfs or local ownership-enforced APFS facts at the private root and below. An unsupported fixture filesystem fails rather than skips. Unsupported ancestry has a separate unbounded production-policy track: injected failures are labeled, and the actual unmodified production observation is logged separately. There is no read-only overlay exception.
+
+Darwin fixtures use `/bin/chmod` only on private paths for real allow, deny-only, and inherited ACLs. Natural absent directory and regular-file regressions use the production reader, with a descriptor filesystem gate at the private root before ACL setup. Allocated-empty validation/enumeration uses real heap-only `acl_init(0)` storage, not the false assumption that natural absence returns allocated storage. Allocated validation/free failure fixtures retrieve real ACL-bearing objects and assert exactly one free on allocated paths, including injected free failures. Deferred-inheritance refusal deliberately injects a true defer result around a genuinely retrieved/validated ACL, per supervisor decision; it is **not native deferred-flag creation/detection or round-trip evidence**. Validation/read/free failures use per-call injection, with real allocation/free where possible. No fixture mutation API is added to production. This limitation must accompany any eventual receipt.
+
+The Darwin bridge uses public SDK types and constants. Getter semantics were verified against [Apple Libc-1752.100.10, commit `71bbe350ab79eef58113991d817ccc6165061a64`, `posix1e/acl_flag.c`](https://github.com/apple-oss-distributions/Libc/blob/71bbe350ab79eef58113991d817ccc6165061a64/posix1e/acl_flag.c): `acl_get_flag_np` returns 1 when the requested bit is set and 0 otherwise, without setting or clearing errno and without validating its pointer. The bridge therefore requires a validated live ACL/entry and a successfully obtained borrowed flagset, uses the ACL-level flagset for `ACL_FLAG_DEFER_INHERIT`, never frees that flagset separately, and ignores stale errno for valid 0/1 getter results. Injected stale-errno regressions cover both values; an unexpected getter result fails closed as an unexpected result, not as a documented errno failure. Correspondence between this public Libc revision and the installed macOS build is **not established**; native tests remain mandatory.
+
+The bounded NULL/ENOENT adjustment follows oracle `86ffd4f1` READY: the public required-attribute contract plus [XNU `f6217f891ac0bb64f3d375211650a4c1ff8ca1ea` (12377.1.9)](https://github.com/apple-oss-distributions/xnu/blob/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/bsd/vfs/vfs_attrlist.c), corroborated by supplied real private APFS probe proc9579 PASS (eight fixtures, four negatives). There is **no established exact public-source mapping** for runtime XNU 12377.91.3. This decision is neither universal filesystem proof nor elimination of concurrent ACL races.
+
+Only no allocated ACL plus ENOENT enters confirmation. The zeroed public `attrlist` has valid bitmapcount and only `ATTR_CMN_EXTENDED_SECURITY`; options are only `FSOPT_REPORT_FULLSIZE` (no returned-attributes or pack-invalid options). A fixed aligned 4096-byte buffer uses SDK-derived fixed-field layout with compile-time assertions. Success, available header/fixed fields, full reported size within capacity, and exactly length 12 / signed offset 8 / reference length 0 are required. No reference is followed, no raw filesec is parsed, and every nonempty/error/oversized/truncated/malformed/unproven result refuses. Failure errno is captured in C; success ignores stale errno. Allocated ACL validation, flags, entry inspection, and free remain independent and never invoke confirmation. The mechanism name is `acl_get_fd_np:extended+fgetattrlist:required-extended-security`. Authority security-read errors preserve native causes and exact path/role/expected/observed/remediation without mapping descriptor ENOENT to pathname absence; the general pathname errno mapper is unchanged.
+
+Regression additions precede production edits but were **not executed** by the worker: getter dispatch, five confirmation errno cases, ten malformed/truncation cases, natural directory/file production observations, and allocated-empty coverage. The existing 12 common cases retain expanded security-error diagnostics; Linux remains eight, Darwin/cgo is 14, and missing/duplicate/skip/filter/incomplete checks are unchanged. The maintained diagnostic probe supplements, never replaces, fresh production-reader and native 31a acceptance gates. Formatting, independent review, and native gates remain pending.
+
+31b and 31c retain the exact future inventories above as planning only. No private create/open API, creation record, file handle, flock, coordinator, canonical anchor access, caller migration, dependency change, release-policy change, or next-slice implementation is included. Production Darwin integration remains **BLOCKED** by the unchanged `CGO_ENABLED=0` release policy. Independent review, native platform gates, clean verification, and vulnerability checks remain required before proceeding to 31b.
+
+## 31b implementation preparation — historical
+
+This section records pre-acceptance implementation and validation planning. Its
+pending-check and candidate-status statements are superseded by the [31b
+acceptance receipt](lifecycle-implementation-plan.md#milestone-1-private-createopen-31b-acceptance-receipt).
+Mechanism limits remain applicable; no acceptance transfers to 31c or coordinator32.
+
+The production-unused candidate adds separate private directory and lock-file
+open/exclusive-create operations, opaque shared-lifetime File.Close, and immutable
+observation-only CreationRecord/CreationError. EEXIST never adopts; existing
+objects are never repaired, truncated or removed. Private-directory parents use
+system-ancestor policy; lock-file parents require exact private-anchor policy.
+Production observations preserve full physical and security ancestry. Test-only
+private security roots retain real native readers and full physical guards.
+
+Successful mkdir permits direct-parent directory nlink inequality across that
+transition. Adopted APFS advice supersedes the earlier mkdir-only file assumption:
+native proc_e309 recorded the same APFS parent identity/UID/GID/mode/filesystem/ACL
+facts and nlink 2→3 after exclusive regular-file creation, refusing before chmod.
+A successful exclusive file open now has an explicit transition after immediate
+creation recording, held regular-FD identity observation and parent/name/full
+physical binding, before the unchanged pre-chmod `boundFile` loop. Unchanged
+`privateParent(RolePrivateAnchor)` supplies two strictly equal guarded postcreation
+observations. Only direct-parent DIRECTORY nlink may differ across file creation,
+and only for verified `EvidencePresent` filesystem model
+`darwin-local-apfs-ownership-enforced`; GOOS or an unverified string is insufficient.
+Identity, UID/GID, mode, filesystem/mount/security and every higher-ancestor fact
+must match before guarded adoption of the postcreation baseline. Linux file
+creation, existing opens, failed creates, precreation and later phases retain
+full equality. Actual counts are retained; no exact increment or causal attribution
+is asserted. Concurrent entry changes within this APFS window cannot be attributed
+separately; it proves neither child inventory nor deletion authority.
+31a readers, comparisons and Dir.Authority are unchanged. Repinned directories
+match both the leased parent chain and first child identity; mkdir still proves
+only a creation event. Restrictive-umask directories are retained without chmod.
+Exclusive file mode establishment requires same-FD/name/ancestry security binding
+before fchmod and exact-0600/otherwise-unchanged observations afterward. Fixed
+read-only/no-follow/nonblocking/no-ctty flags imply no universal device-race or
+future flock-support guarantee. File.Close releases its old parent lease once,
+even on error; parent Close waits for dependent Files.
+
+The exact twelve common roots in TestPrivateCreateOpenBoundary and supporting
+transition, close/lease, umask-subprocess and unavailable tests were defined before
+production private create/open source. Additional native ACL coverage supplements
+these roots. The APFS transition regressions were written before its production
+fix: native guarded counts/model/identity/facts and one exclusive creation record;
+injected model/evidence and complete non-nlink/higher-ancestor comparisons;
+failed/open/precreation/unstable-postcreation/later phases and binding guards.
+Existing exact hook/chmod reachability, refusal paths/reasons/causes/facts and
+isolated hardlink-alias assertions are preserved. Parent-reported tests-only RED
+proc40ad1 exposed eight previous zero-hook false passes with unchanged production;
+this candidate claims no green run or acceptance. This is source-order evidence
+only: the worker executed no tests,
+formatting, build, Git or validation commands. Fresh independent review, reviewed
+isolated parent formatting/verification/vulnerability checks, and complete native
+inventories remain required. No acceptance, lifecycle receipt, flock/31c,
+coordinator/32, caller, C4, dependency or release-policy change is included.
+
+## 31c implementation preparation — historical
+
+This section records pre-acceptance implementation and validation planning. Its
+pending-check and candidate-status statements are superseded by the [31c
+acceptance receipt](lifecycle-implementation-plan.md#milestone-1-filedirectory-flock-31c-acceptance-receipt).
+Mechanism limits remain applicable; coordinator32 requires its own gate.
+
+The production-unused candidate adds `Dir.LockFile(context.Context, Component)`,
+`Dir.LockDirectory(context.Context)` and opaque shared `Lease.Release() error`.
+Each acquisition owns a fresh existing-only File or independently repinned Dir,
+never a dup/shared description. Strict guarded baselines cross opening/repinning
+and waiting without 31b creation nlink exceptions. Full physical and production
+security ancestry are checked internally, with exact policy/fact drift refusal.
+Selected `/` and the fixed temporary root are validation-only, including UID 0.
+
+Close signals pending cancellation before waiting, serializes with publication,
+and waits for active operations and published file AND directory leases. Callers
+Release before awaiting Close. File.Close is unchanged; its final immutable 31b
+observation carries the leaf baseline into flock setup. File leases retain the
+fresh File's original parent token; directory leases transfer the original
+operation token. Context cancellation after publication does not revoke a lease.
+Unlock and close each run once; failures retain joined path-wrapped causes and
+release tokens without reacquiring a closing parent. No C4 classification occurs.
+
+The exact fifteen `TestFlockBoundary` roots, implementations, native process
+handshake helper, and unavailable/API regressions were defined before production
+edits. Supporting assertions were refined and final-observation cancellation
+coverage added during source inspection. No worker
+commands, red execution, green execution, or native capability proof are claimed.
+Private fixtures retain real native filesystem/ACL evidence and full physical
+guards; the child validates fixture identity and native root authority before
+using the test-only security boundary. Parent-owned independent review, formatting,
+clean verification/vulnerability checks, complete native Darwin/Linux inventories,
+and unavailable/foreign-build limits remain pending. No receipt/status promotion,
+coordinator32, caller, dependency, release-policy or integration change is included.
+
+### Parent-only validation handoff
+
+The worker must be stopped before parent review/validation. Do not execute checks from an inherited shell or source the launcher. The reviewed launcher is `/Users/milo/Worktrees/dotty/agent-validation/coord-authority-1adkot34/host.sh`; its accepted actions are `preflight`, `fmt` (format **check**, not formatting), `verify`, and `vuln`. Parent must review source and launcher pins first. Native Darwin evidence must explicitly record cgo/compiler configuration rather than infer it from a passing non-cgo build. The existing launcher does not define a separate Linux or Darwin-no-cgo action; those require their own reviewed clean launch configurations, not worker-invented command extensions.
+
+Required parent evidence: exact candidate identity, OS/architecture, actual fixture filesystem/mount/security facts, cgo/build mode, every required executed leaf and outcome, all 40 preserved native-handle leaves, foreign-target compile results, formatting/lint/vet/test/build results via `mise run verify`, and `mise run vuln`. Run each whole authority aggregator when focused commands are added to a reviewed launcher; selecting children is intentionally a gate failure. Missing native environments or non-skipped leaves block acceptance. No accepted status or authorization to proceed is implied by this candidate.

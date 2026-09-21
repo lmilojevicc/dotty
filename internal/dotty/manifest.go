@@ -7,10 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
-
-	"github.com/pelletier/go-toml/v2"
 )
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
@@ -25,8 +22,8 @@ func LoadManifest(repo string, env Env) (*Manifest, error) {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
 	var manifest Manifest
-	if err := toml.Unmarshal(data, &manifest); err != nil {
-		return nil, fmt.Errorf("parse manifest: %w", err)
+	if err := decodeTOML(data, &manifest); err != nil {
+		return nil, fmt.Errorf("parse manifest %s: %w", path, err)
 	}
 	manifest.normalize()
 	if err := ValidateManifest(&manifest, env); err != nil {
@@ -40,8 +37,17 @@ func SaveManifest(tx *Tx, repo string, manifest *Manifest, env Env) error {
 	if err := ValidateManifest(manifest, env); err != nil {
 		return err
 	}
+	path := ManifestPath(repo)
+	// Direct saves must not silently discard unsupported existing fields either.
+	if _, err := os.Lstat(path); err == nil {
+		if _, err := LoadManifest(repo, env); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect manifest %s: %w", path, err)
+	}
 	data := []byte(FormatManifest(manifest))
-	return WriteFileTx(tx, ManifestPath(repo), data, 0o644)
+	return WriteFileTx(tx, path, data, 0o644)
 }
 
 func ValidateManifest(manifest *Manifest, env Env) error {
@@ -112,6 +118,9 @@ func ValidateManifest(manifest *Manifest, env Env) error {
 	return nil
 }
 
+// FormatManifest formats a validated Manifest with valid UTF-8 strings.
+// It preserves bytes rather than replacing invalid UTF-8; outside this input
+// contract the result is not valid TOML. SaveManifest validates before writing.
 func FormatManifest(manifest *Manifest) string {
 	manifest.normalize()
 	var b bytes.Buffer
@@ -130,8 +139,8 @@ func FormatManifest(manifest *Manifest) string {
 			fmt.Fprintf(
 				&b,
 				"  { source = %s, target = %s },\n",
-				strconv.Quote(link.Source),
-				strconv.Quote(link.Target),
+				tomlBasicString(link.Source),
+				tomlBasicString(link.Target),
 			)
 		}
 		b.WriteString("]\n")
@@ -146,7 +155,7 @@ func FormatManifest(manifest *Manifest) string {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString(strconv.Quote(packageName))
+			b.WriteString(tomlBasicString(packageName))
 		}
 		b.WriteString("]\n")
 	}
@@ -216,6 +225,9 @@ func targetPathContains(parent, child string) bool {
 }
 
 func validateName(kind, name string) error {
+	if err := validateTOMLString(kind+" name", name); err != nil {
+		return err
+	}
 	if !namePattern.MatchString(name) {
 		return fmt.Errorf(
 			"%s name %q must start with a letter or digit and contain only letters, digits, '_' or '-'",
@@ -227,6 +239,9 @@ func validateName(kind, name string) error {
 }
 
 func validateSourcePath(source string) error {
+	if err := validateTOMLString("source", source); err != nil {
+		return err
+	}
 	if source == "" {
 		return fmt.Errorf("source is empty")
 	}
@@ -244,6 +259,9 @@ func validateSourcePath(source string) error {
 }
 
 func validateTargetPath(target string) error {
+	if err := validateTOMLString("target", target); err != nil {
+		return err
+	}
 	if target == "" {
 		return fmt.Errorf("target is empty")
 	}
@@ -263,5 +281,5 @@ func tomlKey(name string) string {
 	if namePattern.MatchString(name) {
 		return name
 	}
-	return strconv.Quote(name)
+	return tomlBasicString(name)
 }

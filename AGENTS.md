@@ -1,5 +1,12 @@
 # Agent Notes
 
+## Engineering Priorities
+
+- Filesystem integrity and user-data preservation are Dotty's primary engineering values and outrank convenience.
+- Mutating and destructive operations must fail closed whenever filesystem ownership, identity, topology, or dependencies are uncertain. Never widen the user's selection or delete unexpected content.
+- Refusal and Conflict diagnostics must identify the exact affected paths, observed state, blocking Link Mappings, Collections, or other dependencies, and a safe remediation or next command.
+- Report mutation outcomes truthfully: say no changes were made only for a pre-mutation refusal. After verified successful rollback, say the state was restored. If restoration fails or cannot be proven, enumerate every uncertain or staged path with recovery guidance; never claim unchanged state. A committed cleanup warning must state that the requested changes committed, list retained artifacts, and tell the user not to retry the operation.
+
 ## Commands
 
 - Build the CLI with `mise run build`; the root `dotty` binary is gitignored.

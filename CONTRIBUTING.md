@@ -71,8 +71,41 @@ Individual checks:
 | Lint | `mise run lint` | Runs `golangci-lint` |
 | Vet | `mise run vet` | Runs `go vet` |
 | Test | `mise run test` | Runs `go test ./...` |
-| Focused test | `mise run test:focused ./internal/cli TestName` | One test |
+| Focused test | `mise run test:focused ./internal/cli TestName` | Non-skipped executed tests matching the full selection |
 | Vulnerabilities | `mise run vuln` | Runs `govulnncheck` |
+
+Focused tests take exactly two positional arguments: one Go package argument
+(including package patterns such as `./...`) and one Go `-run` pattern. Quote
+patterns containing shell metacharacters. There are no additional forwarded
+positional arguments or flags. Normal Go environment settings still apply;
+explicit `-run`, `-json`, and `-count=1` ensure the requested selection is observed
+without reusing cached execution evidence.
+
+The runner prints `executed: PACKAGE TEST` for matching, non-skipped tests with
+both start and completion events, including subtests. It fails when none satisfy
+the full selection (a parent running for a missing child does not count), when
+Go fails, or when execution output cannot be verified. Names aggregate across
+the package argument; a package with no matches does not invalidate matches in
+another completed package. Every started package must have a terminal event,
+even when it contributes no matching tests. Go's hierarchical matching and first-matching alternation
+semantics apply, not a regular expression against the entire test path.
+Focused checks are iteration evidence only; their own real-Go regressions run
+in the ordinary `mise run test` and `mise run verify` gates.
+
+The focused runner currently supports Linux and macOS; other platforms refuse
+before starting Go (this does not change Dotty's application platform support).
+SIGINT/SIGTERM sent to the runner or task-wrapper PID cooperatively stops its
+owned build/test process groups, escalates after a bounded grace period, and
+returns 130/143 after waiting for its direct children. The wrapper retains a Bash
+group leader from build through runner completion; it forwards only to that
+reserved group, never to a potentially reaped runner PID. A private readiness
+acknowledgment defers startup cancellation until the runner subscribes to signals.
+Forwarding stops before the wrapper releases and waits for its anchor and
+synchronously removes its private temporary directory. Signals after that finish
+boundary do not change the completed result. This is not a process sandbox:
+externally killed anchors, descendants that detach or escape their groups,
+blocked output sinks, and uninterruptible kernel tasks are outside this
+cooperative ownership and cancellation guarantee.
 
 ## Tests
 

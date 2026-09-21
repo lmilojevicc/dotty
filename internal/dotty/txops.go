@@ -3,6 +3,7 @@ package dotty
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -14,6 +15,10 @@ var (
 	removeAllPath = os.RemoveAll
 	symlinkPath   = os.Symlink
 	copyPathOp    = copyPath
+
+	// Persistence-only fault seams do not affect move/copy operations.
+	persistenceWrite  = (*os.File).Write
+	persistenceRename = os.Rename
 )
 
 func EnsureDirTx(tx *Tx, dir string, perm os.FileMode) error {
@@ -56,7 +61,7 @@ func WriteFileTx(tx *Tx, path string, data []byte, perm os.FileMode) error {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("existing file %s is not a regular file", path)
 		}
-		previousPerm = info.Mode().Perm()
+		previousPerm = info.Mode()
 		current, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read existing file %s: %w", path, err)
@@ -79,16 +84,16 @@ func WriteFileTx(tx *Tx, path string, data []byte, perm os.FileMode) error {
 			_ = os.Remove(tmpName)
 		}
 	}()
-	if _, err := tmp.Write(data); err != nil {
+	if err := writePersistenceData(tmp, data); err != nil {
 		return fmt.Errorf("write temporary file for %s: %w", path, err)
 	}
-	if err := tmp.Chmod(perm); err != nil {
+	if err := chmodPersistenceFile(tmp, previousPerm); err != nil {
 		return fmt.Errorf("chmod temporary file for %s: %w", path, err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temporary file for %s: %w", path, err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := persistenceRename(tmpName, path); err != nil {
 		return fmt.Errorf("replace %s: %w", path, err)
 	}
 	cleanupTemp = false
@@ -127,19 +132,45 @@ func restoreRegularFileNoFollow(path string, data []byte, perm os.FileMode) erro
 			_ = os.Remove(tmpName)
 		}
 	}()
-	if _, err := tmp.Write(data); err != nil {
+	if err := writePersistenceData(tmp, data); err != nil {
 		return fmt.Errorf("write rollback temporary file for %s: %w", path, err)
 	}
-	if err := tmp.Chmod(perm); err != nil {
+	if err := chmodPersistenceFile(tmp, perm); err != nil {
 		return fmt.Errorf("chmod rollback temporary file for %s: %w", path, err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close rollback temporary file for %s: %w", path, err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := persistenceRename(tmpName, path); err != nil {
 		return fmt.Errorf("restore %s: %w", path, err)
 	}
 	cleanupTemp = false
+	return nil
+}
+
+func writePersistenceData(file *os.File, data []byte) error {
+	n, err := persistenceWrite(file, data)
+	if err == nil && n != len(data) {
+		return io.ErrShortWrite
+	}
+	return err
+}
+
+func chmodPersistenceFile(file *os.File, mode os.FileMode) error {
+	// Apply after writing: writing can clear setuid/setgid. Chmod also avoids
+	// umask narrowing the requested mode of a newly created document.
+	const permissionBits = os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky
+	mode &= permissionBits
+	if err := file.Chmod(mode); err != nil {
+		return err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if got := info.Mode() & permissionBits; got != mode {
+		return fmt.Errorf("permission mode was not preserved: requested %v, observed %v", mode, got)
+	}
 	return nil
 }
 
