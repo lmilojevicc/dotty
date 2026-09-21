@@ -1,4 +1,4 @@
-name: CI (temporary ACL diagnostic only)
+name: CI
 
 on:
   pull_request:
@@ -11,8 +11,6 @@ permissions:
 
 jobs:
   verify:
-    # DRAFT / DO NOT MERGE: retained for restoration, not authorized this attempt.
-    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -55,7 +53,7 @@ jobs:
     # Candidate HEAD only; no duplicate native lane on a later push to main.
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 5
+    timeout-minutes: 90
     env:
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
       WORKFLOW_SHA: ${{ github.workflow_sha }}
@@ -67,7 +65,40 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
-      # Intentionally fails even when both ACLs are absent. No subsequent stages.
-      - name: Observe ancestor metadata only (always fails closed)
-        timeout-minutes: 1
-        run: python3 -B -I .github/scripts/native_ci.py diagnose-acl
+      - name: Bind fresh private environment
+        id: native-prepare
+        run: python3 -B -I .github/scripts/native_ci.py prepare
+
+      - name: Acquire pinned mise bootstrap
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          version: '2026.9.1'
+          install: false
+          cache: false
+
+      - name: Run ordered native gates
+        timeout-minutes: 75
+        shell: bash
+        run: python3 -B -I .github/scripts/native_ci.py run
+
+      - name: Preserve and check available journals
+        if: always() && steps.native-prepare.outcome == 'success'
+        timeout-minutes: 5
+        shell: bash
+        run: python3 -B -I .github/scripts/native_ci.py collect
+
+      - name: Publish validated evidence namespace
+        id: native-publication
+        if: always() && steps.native-prepare.outcome == 'success'
+        timeout-minutes: 5
+        run: python3 -B -I .github/scripts/native_ci.py publish
+
+      - name: Upload curated evidence (not acceptance)
+        if: always() && steps.native-publication.outcome == 'success' && env.DOTTY_NATIVE_UPLOAD_PATH == format('{0}/dotty-native-{1}-{2}/upload', runner.temp, github.run_id, github.run_attempt)
+        timeout-minutes: 5
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.DOTTY_NATIVE_UPLOAD_PATH }}/
+          if-no-files-found: error
+          retention-days: 90

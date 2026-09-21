@@ -76,8 +76,8 @@ def check_collection_deadline():
         raise CollectionDeadline('collection deadline; partial evidence retained')
 
 
-def require_bindings(anchors):
-    current = revalidate_ancestry(anchors)
+def require_bindings(anchors, operation):
+    current = revalidate_ancestry(anchors, operation)
     for path, observed in current.items():
         if path in BOUND_DIRECTORIES:
             assert observed == BOUND_DIRECTORIES[path], 'recorded directory binding drift: ' + path
@@ -93,11 +93,11 @@ class PrivateOutput:
         assert path.is_relative_to(ROOT) and '..' not in path.parts, 'output outside private root'
         assert str(path.parent) in BOUND_DIRECTORIES, 'unbound output directory: ' + str(path.parent)
         self.path, self.limit, self.text, self.count = path, limit, text, 0
-        self.context = trusted_ancestry(path.parent)
+        self.context = trusted_ancestry(path.parent, 'output')
         self.anchors = self.context.__enter__()
         self.stream = None
         try:
-            require_bindings(self.anchors)
+            require_bindings(self.anchors, 'output')
             self.parent = self.anchors[-1][2]
             check_collection_deadline()
             fd = os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -114,7 +114,7 @@ class PrivateOutput:
 
     def check(self):
         check_collection_deadline()
-        require_bindings(self.anchors)
+        require_bindings(self.anchors, 'output')
         current = os.fstat(self.stream.fileno())
         assert stat.S_ISREG(current.st_mode) and current.st_uid == os.geteuid() and current.st_nlink == 1, 'unsafe output leaf'
         assert (current.st_dev, current.st_ino) == (self.initial.st_dev, self.initial.st_ino), 'output descriptor drift'
@@ -194,8 +194,8 @@ def read_private(path, limit):
     """Bounded, nofollow observation with current name/descriptor bindings."""
     check_collection_deadline()
     assert path.is_relative_to(ROOT), 'read outside private root'
-    with trusted_ancestry(path.parent) as anchors:
-        require_bindings(anchors)
+    with trusted_ancestry(path.parent, 'read') as anchors:
+        require_bindings(anchors, 'read')
         fd = anchors[-1][2]
         name = path.name
         before = os.stat(name, dir_fd=fd, follow_symlinks=False)
@@ -204,7 +204,7 @@ def read_private(path, limit):
         leaf = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
         try:
             assert evidence.export_metadata(os.fstat(leaf)) == evidence.export_metadata(before), 'evidence descriptor drift'
-            require_bindings(anchors)
+            require_bindings(anchors, 'read')
             data = bytearray()
             while len(data) < before.st_size:
                 check_collection_deadline()
@@ -214,7 +214,7 @@ def read_private(path, limit):
                 data.extend(block)
             assert evidence.export_metadata(os.fstat(leaf)) == evidence.export_metadata(before), 'evidence descriptor drift'
             assert evidence.export_metadata(os.stat(name, dir_fd=fd, follow_symlinks=False)) == evidence.export_metadata(before), 'evidence name drift'
-            require_bindings(anchors)
+            require_bindings(anchors, 'read')
             return bytes(data)
         finally:
             os.close(leaf)
@@ -225,11 +225,13 @@ def bind():
     identity(ROOT)
     binding = json.loads(read_private(ROOT / 'binding.json', 16384))
     assert binding['root'] == str(ROOT) and binding['uid'] == os.geteuid() > 0
-    with trusted_ancestry(ROOT) as anchors:
-        assert require_bindings(anchors) == binding['ancestry'], 'recorded ancestor binding drift'
+    with trusted_ancestry(ROOT, 'bind') as anchors:
+        assert require_bindings(anchors, 'bind') == binding['ancestry'], 'recorded ancestor binding drift'
     expected_directories = {str(ROOT / name): expected for name, expected in binding['directories'].items()}
     for name, expected in binding['directories'].items():
-        assert identity(ROOT / name) == expected, 'private directory binding drift: ' + name
+        with trusted_ancestry(ROOT / name, 'bind') as anchors:
+            require_bindings(anchors, 'bind')
+            assert identity(ROOT / name) == expected, 'private directory binding drift: ' + name
     for path, expected in (binding['ancestry'] | expected_directories).items():
         assert path not in BOUND_DIRECTORIES or BOUND_DIRECTORIES[path] == expected, 'recorded directory binding drift: ' + path
     BOUND_DIRECTORIES.update(binding['ancestry'] | expected_directories)
@@ -240,23 +242,56 @@ def bind():
     return binding
 
 
-def ancestor_policy(fd, path):
+def private_directories():
+    # Control directories only, not test-created negative fixture objects.
+    return {ROOT} | {ROOT / name for name in (*PRIVATE.values(), 'evidence', 'compile', 'upload')}
+
+
+def directory_endpoint(operation, endpoint):
+    """Closed harness operations; neither binding JSON nor CLI supplies a waiver."""
+    endpoints = {
+        'create-root': {ROOT.parent}, 'create-private': {ROOT},
+        'bind': private_directories(), 'output': private_directories(),
+        'read': private_directories(), 'source-inventory': {WORK},
+        'preflight': {ROOT / 'tmp'}, 'export': {LOGS, ROOT / 'upload'},
+        'publish': {ROOT}, 'github-env': {ROOT.parent / '_runner_file_commands'},
+        'collector': {ROOT / 'tmp'}, 'upload': {ROOT / 'upload'},
+    }
+    assert operation in endpoints, 'unknown directory operation'
+    assert endpoint in endpoints[operation], 'directory endpoint mismatch: ' + operation + ': ' + str(endpoint)
+    assert endpoint.is_absolute() and '..' not in endpoint.parts, 'unsafe ancestor path'
+    return private_directories() | {ROOT.parent, ROOT.parent / '_runner_file_commands', endpoint}
+
+
+def ancestor_policy(fd, path, operation, endpoint):
+    strict = directory_endpoint(operation, endpoint)
+    assert path == endpoint or path in endpoint.parents, 'ancestor outside operation chain'
     st = os.fstat(fd)
     assert stat.S_ISDIR(st.st_mode) and st.st_uid in (0, os.geteuid()), 'unsafe ancestor owner: ' + str(path)
     assert not st.st_mode & 0o022, 'writable ancestor: ' + str(path)
+    failures = []
     for attribute in ('system.posix_acl_access', 'system.posix_acl_default'):
         try:
             os.getxattr(fd, attribute)
         except OSError as error:
-            assert error.errno == errno.ENODATA, 'unsupported/unknown ancestor ACL: ' + str(path)
+            if error.errno != errno.ENODATA:
+                failures.append('unsupported/unknown ancestor ACL: ' + str(path) + ': ' + attribute)
         else:
-            raise AssertionError('ancestor ACL present: ' + str(path))
+            if attribute == 'system.posix_acl_access' or path in strict:
+                failures.append('ancestor ACL present: ' + str(path) + ': ' + attribute)
+    assert not failures, '; '.join(failures)
 
 
-def revalidate_ancestry(anchors):
+def revalidate_ancestry(anchors, operation):
+    assert anchors, 'empty ancestor chain'
+    endpoint = anchors[-1][4]
+    directory_endpoint(operation, endpoint)
+    assert [node[4] for node in anchors] == list(reversed(endpoint.parents)) + [endpoint], 'incomplete ancestor chain'
     bindings = {}
-    for parent, name, fd, initial, path in anchors:
-        ancestor_policy(fd, path)
+    for index, (parent, name, fd, initial, path) in enumerate(anchors):
+        assert parent == (anchors[index - 1][2] if index else None), 'ancestor descriptor chain mismatch'
+        assert name == (path.name if index else '/'), 'ancestor component mismatch'
+        ancestor_policy(fd, path, operation, endpoint)
         current = os.fstat(fd)
         keys = ('dev', 'ino', 'mode', 'uid', 'gid')
         observed = {key: getattr(current, 'st_' + key) for key in keys}
@@ -268,7 +303,8 @@ def revalidate_ancestry(anchors):
 
 
 @contextmanager
-def trusted_ancestry(path):
+def trusted_ancestry(path, operation):
+    directory_endpoint(operation, path)  # Reject role/path mismatch before even opening.
     assert path.is_absolute() and '..' not in path.parts, 'unsafe ancestor path'
     anchors = []
     try:
@@ -280,9 +316,9 @@ def trusted_ancestry(path):
             fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
             initial = {key: getattr(os.fstat(fd), 'st_' + key) for key in ('dev', 'ino', 'mode', 'uid', 'gid')}
             anchors.append((parent, name, fd, initial, current))
-            ancestor_policy(fd, current)
+            ancestor_policy(fd, current, operation, path)
             parent = fd
-        revalidate_ancestry(anchors)
+        revalidate_ancestry(anchors, operation)
         yield anchors
     finally:
         for _, _, fd, _, _ in reversed(anchors):
@@ -290,8 +326,8 @@ def trusted_ancestry(path):
 
 
 def create_root():
-    with trusted_ancestry(ROOT.parent) as anchors:
-        bindings = revalidate_ancestry(anchors)
+    with trusted_ancestry(ROOT.parent, 'create-root') as anchors:
+        bindings = revalidate_ancestry(anchors, 'create-root')
         parent = anchors[-1][2]
         os.mkdir(ROOT.name, mode=0o700, dir_fd=parent)
         created = os.stat(ROOT.name, dir_fd=parent, follow_symlinks=False)
@@ -301,7 +337,7 @@ def create_root():
             assert evidence.export_metadata(st) == evidence.export_metadata(created), 'new root open drift'
             assert st.st_uid == os.geteuid() and stat.S_IMODE(st.st_mode) == 0o700, 'new root ownership/mode'
             initial = {key: getattr(st, 'st_' + key) for key in ('dev', 'ino', 'mode', 'uid', 'gid')}
-            bindings = revalidate_ancestry(anchors + [(parent, ROOT.name, fd, initial, ROOT)])
+            bindings = revalidate_ancestry(anchors + [(parent, ROOT.name, fd, initial, ROOT)], 'bind')
         finally:
             os.close(fd)
         BOUND_DIRECTORIES.update(bindings)
@@ -310,8 +346,9 @@ def create_root():
 
 def create_private_directory(name):
     assert name and '/' not in name and name not in ('.', '..')
-    with trusted_ancestry(ROOT) as anchors:
-        require_bindings(anchors)
+    assert ROOT / name in private_directories(), 'unknown private directory'
+    with trusted_ancestry(ROOT, 'create-private') as anchors:
+        require_bindings(anchors, 'create-private')
         parent = anchors[-1][2]
         os.mkdir(name, mode=0o700, dir_fd=parent)
         created = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -321,7 +358,7 @@ def create_private_directory(name):
             initial = {key: getattr(os.fstat(fd), 'st_' + key) for key in ('dev', 'ino', 'mode', 'uid', 'gid')}
             assert initial['uid'] == os.geteuid() and stat.S_IMODE(initial['mode']) == 0o700
             chain = anchors + [(parent, name, fd, initial, ROOT / name)]
-            require_bindings(chain)
+            require_bindings(chain, 'bind')
             BOUND_DIRECTORIES[str(ROOT / name)] = initial
         finally:
             os.close(fd)
@@ -337,8 +374,8 @@ def append_github_env(values, require_empty=False):
                for key, value in values.items()), 'invalid environment record'
     data = data.encode('utf-8')
     assert len(data) <= 65536, 'environment append budget'
-    with trusted_ancestry(parent) as anchors:
-        require_bindings(anchors)
+    with trusted_ancestry(parent, 'github-env') as anchors:
+        require_bindings(anchors, 'github-env')
         directory = anchors[-1][2]
         before = os.stat(path.name, dir_fd=directory, follow_symlinks=False)
         assert stat.S_ISREG(before.st_mode) and before.st_uid == os.geteuid() and before.st_nlink == 1, 'unsafe GITHUB_ENV leaf'
@@ -349,7 +386,7 @@ def append_github_env(values, require_empty=False):
             expected = evidence.export_metadata(before)
             remaining = memoryview(data)
             while remaining:
-                require_bindings(anchors)
+                require_bindings(anchors, 'github-env')
                 assert evidence.export_metadata(os.fstat(fd)) == expected, 'GITHUB_ENV descriptor drift'
                 assert evidence.export_metadata(os.stat(path.name, dir_fd=directory, follow_symlinks=False)) == expected, 'GITHUB_ENV name drift'
                 check_collection_deadline()
@@ -361,7 +398,7 @@ def append_github_env(values, require_empty=False):
                 assert all(getattr(after, 'st_' + key) == expected[key]
                            for key in ('dev', 'ino', 'mode', 'uid', 'gid')), 'GITHUB_ENV security drift'
                 expected = evidence.export_metadata(after)
-            require_bindings(anchors)
+            require_bindings(anchors, 'github-env')
             assert evidence.export_metadata(os.stat(path.name, dir_fd=directory, follow_symlinks=False)) == expected, 'GITHUB_ENV name drift'
         finally:
             os.close(fd)
@@ -738,15 +775,16 @@ def worktree_inventory(expected, allow_build=False):
                 assert len(after) < 20000, 'source directory entry budget'
                 after.append(entry.name)
         assert sorted(after) == sorted(names), 'source namespace drift'
-    fd = os.open(WORK, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
+    with trusted_ancestry(WORK, 'source-inventory') as anchors:
+        current = require_bindings(anchors, 'source-inventory')
+        BOUND_DIRECTORIES.update(current)
+        fd = anchors[-1][2]
         before = evidence.export_metadata(os.fstat(fd))
         assert before['uid'] == os.geteuid(), 'workspace owner mismatch'
         assert evidence.export_metadata(WORK.lstat()) == before, 'workspace name drift'
         walk(fd)
         assert evidence.export_metadata(os.fstat(fd)) == before and evidence.export_metadata(WORK.lstat()) == before, 'workspace binding drift'
-    finally:
-        os.close(fd)
+        require_bindings(anchors, 'source-inventory')
     assert expected.keys() <= {record['path'] for record in paths}, 'missing tracked source'
     return paths
 
@@ -862,16 +900,16 @@ def preflight():
             assert error.errno == errno.ENODATA, 'ACL unsupported/unknown'
         else:
             raise AssertionError('unexpected inherited ACL')
-    with trusted_ancestry(ROOT / 'tmp') as anchors:
-        require_bindings(anchors)
+    with trusted_ancestry(ROOT / 'tmp', 'preflight') as anchors:
+        require_bindings(anchors, 'preflight')
         parent = anchors[-1][2]
         assert evidence.export_metadata(os.stat('preflight-file', dir_fd=parent, follow_symlinks=False)) == evidence.export_metadata(st), 'probe drift'
         os.link('preflight-file', 'preflight-hardlink', src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
-        require_bindings(anchors)
+        require_bindings(anchors, 'preflight')
         os.symlink('preflight-file', 'preflight-symlink', dir_fd=parent)
-        require_bindings(anchors)
+        require_bindings(anchors, 'preflight')
         os.mkfifo('preflight-fifo', 0o600, dir_fd=parent)
-        require_bindings(anchors)
+        require_bindings(anchors, 'preflight')
         assert os.stat('preflight-file', dir_fd=parent, follow_symlinks=False).st_nlink == 2
     write_json(LOGS / 'preflight.json', {'uid': os.geteuid(), 'private_environment': True,
                                        'acl_absence': 'ENODATA', 'reaping': 'ESRCH only',
@@ -1062,8 +1100,8 @@ def upload_inventory(expected_names, deadline=None):
     def current_time():
         if deadline is not None and time.monotonic() >= deadline:
             raise CollectionDeadline('publication deadline expired')
-    with trusted_ancestry(ROOT / 'upload') as anchors:
-        require_bindings(anchors)
+    with trusted_ancestry(ROOT / 'upload', 'upload') as anchors:
+        require_bindings(anchors, 'upload')
         def names():
             result = set()
             with os.scandir(anchors[-1][2]) as scan:
@@ -1075,14 +1113,14 @@ def upload_inventory(expected_names, deadline=None):
         assert names() == set(expected_names), 'upload namespace drift'
         for name in sorted(expected_names):
             current_time()
-            require_bindings(anchors)
+            require_bindings(anchors, 'upload')
             before = evidence.export_metadata(os.stat(name, dir_fd=anchors[-1][2], follow_symlinks=False))
             data = read_private(ROOT / 'upload' / name, roles[name][1])
             assert evidence.export_metadata(os.stat(name, dir_fd=anchors[-1][2], follow_symlinks=False)) == before, 'upload inventory leaf drift'
-            require_bindings(anchors)
+            require_bindings(anchors, 'upload')
             records[name] = {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'metadata': before}
         assert names() == set(expected_names), 'upload namespace drift'
-        require_bindings(anchors)
+        require_bindings(anchors, 'upload')
     return records
 
 
@@ -1112,9 +1150,9 @@ def curate_upload(deadline=None, started=None):
                 assert len(result) < len(roles) + 1, 'upload namespace budget'
                 result.add(entry.name)
         return result
-    with trusted_ancestry(LOGS) as inputs, trusted_ancestry(destination) as outputs:
-        require_bindings(inputs)
-        require_bindings(outputs)
+    with trusted_ancestry(LOGS, 'export') as inputs, trusted_ancestry(destination, 'export') as outputs:
+        require_bindings(inputs, 'export')
+        require_bindings(outputs, 'export')
         names = []
         with os.scandir(inputs[-1][2]) as scan:
             for entry in scan:
@@ -1124,12 +1162,12 @@ def curate_upload(deadline=None, started=None):
         for name in sorted(names):
             within_deadline()
             try:
-                require_bindings(inputs)
+                require_bindings(inputs, 'export')
                 assert name in roles, 'unexpected evidence filename'
                 role, limit = roles[name]
                 # No output is opened until ALL input read/name/ancestry checks pass.
                 data = read_private(LOGS / name, limit)
-                require_bindings(inputs)
+                require_bindings(inputs, 'export')
                 within_deadline()
             except (OSError, AssertionError) as error:
                 refusals.append({'name': name, 'reason': str(error)})
@@ -1140,7 +1178,7 @@ def curate_upload(deadline=None, started=None):
             assert {key: stream.closed_record[key] for key in approved} == approved, 'upload writer payload drift'
             expected[name] = stream.closed_record
             records.append({'name': name, 'role': role, **approved})
-        require_bindings(inputs)
+        require_bindings(inputs, 'export')
         with os.scandir(inputs[-1][2]) as scan:
             after = []
             for entry in scan:
@@ -1153,7 +1191,7 @@ def curate_upload(deadline=None, started=None):
             within_deadline()
             data = read_private(destination / record['name'], roles[record['name']][1])
             assert len(data) == record['bytes'] and hashlib.sha256(data).hexdigest() == record['sha256'], 'upload copy drift'
-        require_bindings(outputs)
+        require_bindings(outputs, 'export')
         assert output_names(outputs[-1][2]) == set(expected), 'upload namespace drift'
         within_deadline()
         expected['upload-manifest.json'] = write_json(destination / 'upload-manifest.json', {
@@ -1161,7 +1199,7 @@ def curate_upload(deadline=None, started=None):
             'missing_allowed_names': sorted(set(roles) - set(names)),
             'inventory_excludes': ['upload-manifest.json'], 'native_acceptance': False,
             'boundary': 'validated observations only; later races or unavailable inputs require refusal'})
-        require_bindings(outputs)
+        require_bindings(outputs, 'export')
         assert output_names(outputs[-1][2]) == set(expected), 'upload namespace drift'
         assert upload_inventory(expected, deadline) == expected, 'upload writer baseline drift'
         # Readiness is separate from uploaded files and exists only after safe curation.
@@ -1179,8 +1217,8 @@ def publish():
     global COLLECTION_END
     bind()
     assert UPLOAD_ENV not in os.environ, 'preexisting upload publication marker'
-    with trusted_ancestry(ROOT) as anchors:
-        require_bindings(anchors)
+    with trusted_ancestry(ROOT, 'publish') as anchors:
+        require_bindings(anchors, 'publish')
         try:
             os.stat('upload-publication.json', dir_fd=anchors[-1][2], follow_symlinks=False)
         except FileNotFoundError:
@@ -1316,10 +1354,10 @@ def collect_evidence():
         return sorted(result)
 
     # Reopened components must match the ORIGINAL bind, not a new baseline.
-    with trusted_ancestry(ROOT / 'tmp') as anchors:
+    with trusted_ancestry(ROOT / 'tmp', 'collector') as anchors:
         expected = binding['ancestry'] | {str(ROOT / name): value for name, value in binding['directories'].items()}
         def check_anchors():
-            current = require_bindings(anchors)
+            current = require_bindings(anchors, 'collector')
             assert all(current[path] == value for path, value in expected.items() if path in current), 'collector original binding drift'
         check_anchors()
         tmp = anchors[-1][2]

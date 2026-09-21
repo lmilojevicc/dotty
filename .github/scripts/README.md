@@ -1,111 +1,90 @@
-# Temporary ACL diagnostic — DRAFT / DO NOT MERGE
+# Bounded native fixture CI — SOURCE PREPARATION ONLY
 
-**Source preparation only. All new regressions are UNRUN.** This commit is for one
-additional, separately reviewed/local-checked diagnostic attempt, not native
-acceptance. The parent owns all checks, commit/push and the one new PR-synchronize
-run. Run **35548268496, attempt 1 is consumed**; no rerun, retry or policy waiver is
-authorized. Do not merge this temporary workflow or restore operational progression
-without a separate decision.
+**Task34/33a bounded fixtures only. No production hosted-ancestry, canonical CLI,
+or Milestone 1 compatibility claim. All changed/new regressions are UNRUN.**
+Production `internal/nativefs` is untouched. Its full `/`-to-leaf authority still
+refuses the historically observed `/home` default ACL, assuming earlier checks pass.
+`fixtureAuthority` and `privateFixtureCalls` cut security observations only in Go
+`_test.go` fixtures; complete physical topology checks remain. These cutoffs are
+not imported into the CI harness, and production refusal cases remain required.
 
-## Current diagnostic-only contract
+Both authorized CI attempts are consumed (35548268496 and diagnostic 35551465637).
+The latter saved six directories: `/home` was root-owned 0755 with absent access
+ACL and present default ACL; lower existing directories through `_temp` and
+`_runner_file_commands` had both attributes absent. Those are historical facts,
+not current authority, admission by bytes/UID/path, or evidence of native success.
+A default ACL governs creation in its immediate parent, not existing lower
+objects. The helper therefore requires the actual creation parent to be strict;
+it never creates directly in an admitted higher default-bearing directory.
 
-`ci.yml` disables `verify` with a literal false job condition while retaining its
-source for later restoration. `native-linux` now has **only pinned candidate-HEAD
-checkout and `native_ci.py diagnose-acl`**. It retains read-only token permission,
-`persist-credentials: false`, same-repository PR routing and exact candidate/workflow
-SHA/ref expressions. Triggers are unchanged. There is no native-job tool acquisition,
-preparation, native test, collector, curation, publication or upload step. The
-operational helper entry points remain source only, unreachable from this route.
-Restore the operational workflow from the reviewed parent baseline only after an
-explicit decision; it is not a fallback in this attempt.
+## Prepared directory-role policy
 
-The diagnostic always exits **1**, including when both ACLs are absent everywhere.
-It never calls the operational ancestor policy or grants native filesystem authority.
-`ancestor_policy` and production `internal/nativefs/authority_linux.go` are unchanged.
-No private root, environment-file append, filesystem write, file-content read,
-directory enumeration, arbitrary-xattr read, NSS lookup, subprocess, tool installation,
-timer, signal, ACL change or cleanup is performed by the observer. Interpreter/source
-loading and Actions checkout/platform log activity are distinct from these metadata
-observations; this is not a globally unchanged-filesystem claim.
+Every opened ancestor retains directory, root-or-effective-UID, no group/other
+write, nofollow descriptor, current-name, retained-identity and repeated checks.
+Access ACL absence is mandatory everywhere. Both attributes are queried even when
+one fails. Only ENODATA means absence; unsupported, unreadable or unknown refuses.
+Readable higher default ACL bytes are not interpreted or whitelisted.
 
-Only canonical absolute `RUNNER_TEMP` and the fixed
-`RUNNER_TEMP/_runner_file_commands/set_env_<UUID>` environment-file role are accepted.
-Only the former directory's ancestors and **GITHUB_ENV.parent** ancestors are opened,
-never the environment file. Root-first chains are deduplicated. Opens use read-only
-`O_DIRECTORY | O_NOFOLLOW` descriptors from `/`, with nofollow parent-relative name
-stats and current full-chain FD/name comparisons before/after each ACL query.
-Device/inode, numeric UID/GID/mode/link count are reported; mtime/ctime are compared
-internally for drift, not interpreted as permissions. Final binding rechecks are
-observations, not lasting authority. Inaccessible names, errors and drift are unknown;
-descendants of an unavailable binding are not opened.
-
-Only `system.posix_acl_access` and `system.posix_acl_default` are queried by FD.
-ENODATA is recorded separately from errors (numeric errno). Each result stays pending
-until its post-query full-chain check succeeds. Failed checks emit attribute-level
-unknown without that result's bytes, hash, length or presence/absence claim; acquisition
-counters stay charged and earlier validated attributes remain. Validated reads record
-presence, length and SHA256. Complete raw bytes are emitted as hex only when bounded;
-there is **no ACL decoder or permission conclusion**. Every present value, including
-empty or malformed bytes, has unknown/uninterpreted semantics. Complete bytes plus
-numeric process euid/egid/groups permit later offline interpretation. A hash alone,
-omitted bytes, or any observed absence is never policy admission.
-
-| Limit | Diagnostic bound |
+| Closed operation | Valid endpoint (both ACLs absent) |
 | --- | --- |
-| Paths | 1,024 characters each; canonical syntax; escaped role header at most 4 KiB |
-| Ancestors | 32 unique nodes and depth 32 (including `/`) |
-| ACL input | Linux VFS 64 KiB/value; at most 64 API calls, at most 1 MiB aggregate; reserve one full value before each call |
-| Complete raw bytes | At most 1,028 bytes/value; never emit a truncated prefix |
-| Process groups | At most 128 reported; larger sets explicitly unknown with count |
-| Console | ASCII-escaped compact JSON, at most 16 KiB including terminal failure; records at most 10 KiB |
-| Time | 45-second read-boundary clock; one-minute Actions diagnostic step cap; five-minute outer job cap |
+| `create-root` | ROOT.parent; actual mkdir parent |
+| `create-private` | ROOT; only fixed child names may be created |
+| `bind`, `output`, `read` | ROOT or fixed PRIVATE/evidence/compile/upload control directories |
+| `source-inventory` | WORK, with retained ancestry across source checkpoints |
+| `preflight`, `collector` | ROOT/tmp |
+| `export` | ROOT/evidence or ROOT/upload |
+| `upload` | ROOT/upload |
+| `publish` | ROOT |
+| `github-env` | ROOT.parent/_runner_file_commands, after existing filename-role validation |
 
-The Python `os.getxattr` API relies on the Linux VFS value bound; non-Linux or missing
-API refuses. Query counts are API calls, not syscall counts. There is no hard-blocked
-filesystem guarantee: checks cannot interrupt a blocked kernel call; the platform
-may terminate the step and lose output. No timers/signals are added. The sole JSON
-result goes to stdout, not files. Node IDs enumerate root-first RUNNER_TEMP ancestry,
-then previously unseen GITHUB_ENV.parent ancestry. `omitted_nodes` identifies records
-excluded by output budget; `missing_attributes` and per-attribute unknown reasons
-identify missing queries/bytes. Full raw values are dropped, never sliced, when console
-budget is exhausted. Fatal setup/observation, serialization or final-console-budget
-failure uses a fixed bounded all-records-missing document. A stdout failure is not
-retried, even after partial output, and never causes a fallback file write.
+ROOT.parent, ROOT, every fixed PRIVATE/evidence/compile/upload directory and the
+runner file-command parent remain strict even when another operation makes them
+intermediate ancestors. Every endpoint is conservatively strict too. Roles are
+hardcoded at operation calls, not CLI/environment/binding-JSON waivers or arbitrary
+permission booleans. Unknown roles, wrong endpoints, incomplete/relinked chains
+and unknown private child names refuse before creation/write. Chain extension
+uses the validated bind role without demoting its actual creation parent.
 
-### Retained failure facts and regression preparation
+Recursive source traversal keeps its existing metadata/name checks. Collector
+journal traversal keeps its existing source-bound negative-input and metadata-only
+rules: test-created adverse objects are not blanket-classified as harness control
+directories. Regular-leaf guards are unchanged. Restrictive modes, metadata/name
+checks and default-free creation parents are protections, **not a claim that every
+regular leaf has an explicitly verified absent ACL**. Repeated observations are
+not atomic exclusion of concurrent same-UID/privileged changes.
 
-Attempt 1 refused with `ancestor ACL present: /home`, **before private-root mkdir or
-GITHUB_ENV writes by preparation**. Access is checked first, default second; the old
-message does not identify which ACL was present or its permissions. No permissive
-policy change is justified. The ordinary Ubuntu job and its 81 helper tests passed
-on that attempt; that is useful regression evidence, **not ordered ARM64 acceptance**.
-Native gates, collection, publication and upload were skipped.
+## Workflow source restoration and remaining gates
 
-The original 81 test purposes and all 14 prior diagnostic purposes are retained:
-**98 prepared definitions**, including three new review-fix definitions, all new
-regressions **UNRUN**. Added portable regressions use the actual
-observer/dispatcher with fake directory FDs, stats, exact xattrs and clock data; no
-native files, live ACL probes or whole-Linux test setup. They prepare read-only flags,
-role/path validation, absent/access/default/malformed data, complete-raw/attribute/
-aggregate/query/node/group/console budgets, escaped output, FD/name/metadata drift,
-inaccessibility, deadlines, nonzero exits, forbidden progression and temporary
-workflow routing. Review fixes add pending present/ENODATA/error drift checks,
-post-read deadline/inaccessibility with prior-attribute preservation, and mocked
-serialization/final-console/partial-stdout terminal failures without file fallback.
-**None has been executed in this source-preparation step.**
+The unpublished workflow source is restored byte-for-byte from the parent-verified
+baseline (319d76c), SHA256
+`b2c8be0ec4f1c4d417e1ede090f23fb636d7c50673aa6d949aadcf27932b3c18`.
+It re-enables ordinary verification and the prepared native route in source only;
+it grants no commit, push, run, rerun or merge permission. Triggers, action pins,
+permissions, operational budgets and native gate counts match that baseline.
+The read-only, always-nonzero `diagnose-acl` CLI remains available but is not selected
+by the restored workflow. Its observation/byte budgets and no-progression behavior
+are unchanged. The diagnostic routing regression now asserts the restored route
+and exact workflow hash, rather than claiming the diagnostic is still selected.
 
-## Historical operational preparation (inactive in this diagnostic workflow)
+Prepared inventory: **110 definitions = 98 retained purposes + 12 new portable
+role-policy definitions** (99 in test_native_ci.py, 11 unchanged parser definitions).
+The Linux test-only host-ancestry cutoff only adapts to the policy signature; it
+never becomes CI policy. New fake-descriptor tests cover higher default-only
+admission; access ACL refusal at every node; both ACLs on fixed strict roles and
+intermediate roles; unknown/mismatched endpoints; creation refusal before mkdir;
+chain extension/demotion; ACL errors; symlink/owner/mode refusal; identity/ACL drift;
+output/read/GITHUB_ENV refusal before leaf open; and all ancestry caller wiring,
+including source checkpoints, preflight, collector and upload. Source wiring is
+not dynamic coverage of every end-to-end caller. No prepared test was imported or
+executed. Counts describe definitions, not passing tests or native gates.
 
-The remainder preserves prior operational design/checkpoint notes for review and
-restoration. Its workflow progression and approval descriptions are historical,
-not permissions or enabled steps in this temporary diagnostic commit.
-
-**This repair is source preparation only; new assertions are UNRUN. No native
-acceptance is claimed.** Publication,
-local checks, tool acquisition, one proposed CI execution, artifact download/audit,
-and integration require separate parent approval. Do not run these helpers locally
-against real user paths. Existing checkpoints, evidence and resources are untouched;
-the a238 controller remains frozen.
+Remaining gates: independent source/control review; separate authorization for
+local mise checks, portable/Linux helper tests and real verification; parent
+publication and exact-candidate execution approval with fresh target checks;
+then complete downloaded evidence and independent bounded-fixture audit. Neither
+local success nor a green future workflow alone accepts Task34/33a or completes M1.
+No readiness claim, new attempt, ACL mutation, sudo, signal, resource or cleanup
+permission follows. Historical notes below are design/history, not current receipts.
 
 ## Route and triggers
 
@@ -141,8 +120,12 @@ HOME, all XDG roots, TMPDIR, fake DOTTY_REPO, Go caches/modules, mise directorie
 compile outputs are private children. Root/directory device, inode, UID/GID and mode
 bindings are recorded and checked. Before any root creation, every ancestor must be
 a nofollow-bound directory owned by root or the effective UID, with no group/other
-write bits and **ENODATA** for both Linux POSIX access/default ACLs. Missing ACL
-support, ACL presence and unknown metadata refuse. Creation is exclusive and
+write bits and **ENODATA** for its access ACL. Both ACL attributes are queried;
+only ENODATA establishes absence. Readable default-ACL presence is admitted only
+on existing higher traversal-only directories. ROOT.parent, ROOT, fixed private
+control directories, the runner file-command parent and every traversal endpoint
+require both ACLs absent, including when intermediate. Missing ACL support,
+unreadable/unknown ACL observations and unsafe metadata refuse. Creation is exclusive and
 descriptor-relative; current names/FDs are checked before each mkdir. There is no
 chmod-parent, sudo, alternate root or adoption fallback. Hosted `RUNNER_TEMP`
 ancestry may be unsupported: this preparation does not assume it passes.

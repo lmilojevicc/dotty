@@ -61,9 +61,9 @@ class NativeCITests(unittest.TestCase):
         # Public test-host ancestry is not claimed safe. Exercise actual authority
         # within this test-owned subtree, never chmod /tmp or a hosted parent.
         policy = m.ancestor_policy
-        def private_policy(fd, path):
+        def private_policy(fd, path, operation, endpoint):
             if path.is_relative_to(self.parent):
-                policy(fd, path)
+                policy(fd, path, operation, endpoint)
         self.policy = mock.patch.object(m, 'ancestor_policy', private_policy)
         self.policy.start()
         self.addCleanup(self.policy.stop)
@@ -236,8 +236,8 @@ class NativeCITests(unittest.TestCase):
         parent.mkdir(mode=0o700)
         root = parent / 'new'
         with mock.patch.object(m, 'ROOT', root):
-            with m.trusted_ancestry(parent) as anchors:
-                self.assertTrue(m.revalidate_ancestry(anchors))
+            with mock.patch.object(m, 'ROOT', parent / 'new'), m.trusted_ancestry(parent, 'create-root') as anchors:
+                self.assertTrue(m.revalidate_ancestry(anchors, 'create-root'))
             parent.chmod(0o770)  # Only the test-owned negative fixture changes mode.
             with self.assertRaisesRegex(AssertionError, 'writable ancestor: ' + str(parent)):
                 m.create_root()
@@ -247,15 +247,15 @@ class NativeCITests(unittest.TestCase):
         m = self.module
         parent = self.parent / 'replaceable'
         parent.mkdir(mode=0o700)
-        with m.trusted_ancestry(parent) as anchors:
-            m.revalidate_ancestry(anchors)
+        with mock.patch.object(m, 'ROOT', parent / 'new'), m.trusted_ancestry(parent, 'create-root') as anchors:
+            m.revalidate_ancestry(anchors, 'create-root')
         original, calls = m.revalidate_ancestry, []
-        def replaced(anchors):
+        def replaced(anchors, operation):
             calls.append(True)
             if len(calls) == 2:
                 parent.rename(self.parent / 'retained-original')
                 parent.mkdir(mode=0o700)
-            return original(anchors)
+            return original(anchors, operation)
         with mock.patch.object(m, 'ROOT', parent / 'new'), mock.patch.object(m, 'revalidate_ancestry', replaced):
             with self.assertRaisesRegex(AssertionError, 'ancestor binding drift: ' + str(parent)):
                 m.create_root()
@@ -266,17 +266,17 @@ class NativeCITests(unittest.TestCase):
         m = self.module
         fd = os.open(self.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
-            m.ancestor_policy(fd, self.parent)
+            m.ancestor_policy(fd, self.parent, 'create-root', m.ROOT.parent)
             foreign = mock.Mock(st_mode=os.fstat(fd).st_mode, st_uid=os.geteuid() + 1)
             with mock.patch.object(m.os, 'fstat', return_value=foreign):
                 with self.assertRaisesRegex(AssertionError, 'unsafe ancestor owner:'):
-                    m.ancestor_policy(fd, self.parent)
+                    m.ancestor_policy(fd, self.parent, 'create-root', m.ROOT.parent)
             with mock.patch.object(m.os, 'getxattr', return_value=b'ACL'):
                 with self.assertRaisesRegex(AssertionError, 'ancestor ACL present:'):
-                    m.ancestor_policy(fd, self.parent)
+                    m.ancestor_policy(fd, self.parent, 'create-root', m.ROOT.parent)
             with mock.patch.object(m.os, 'getxattr', side_effect=OSError(errno.ENOTSUP, 'unsupported')):
                 with self.assertRaisesRegex(AssertionError, 'unsupported/unknown ancestor ACL:'):
-                    m.ancestor_policy(fd, self.parent)
+                    m.ancestor_policy(fd, self.parent, 'create-root', m.ROOT.parent)
         finally:
             os.close(fd)
 
@@ -1660,26 +1660,210 @@ class ACLDiagnosticTests(unittest.TestCase):
                 self.module.observe_acl_diagnostic()
         self.assertEqual(self.opens, [])
 
-    def test_workflow_is_checkout_and_diagnostic_only_with_verify_disabled(self):
-        source = (Path(__file__).resolve().parents[2] / '.github/workflows/ci.yml').read_text()
+    def test_workflow_restores_reviewed_ordinary_and_native_route(self):
+        raw = (Path(__file__).resolve().parents[2] / '.github/workflows/ci.yml').read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),
+                         'b2c8be0ec4f1c4d417e1ede090f23fb636d7c50673aa6d949aadcf27932b3c18')
+        source = raw.decode()
         verify, native = source.split('  verify:\n', 1)[1].split('  native-linux:\n', 1)
-        self.assertIn('    if: ${{ false }}\n', verify)
+        self.assertNotIn('    if: ${{ false }}', verify)
         self.assertIn('      - name: Run native helper regressions\n', verify)
-        self.assertEqual(native.count('      - name:'), 2)
-        self.assertEqual(native.count('        run:'), 1)
-        self.assertIn('python3 -B -I .github/scripts/native_ci.py diagnose-acl\n', native)
-        self.assertIn('        timeout-minutes: 1\n', native)
+        self.assertNotIn('diagnose-acl', native)
+        for stage in ('prepare', 'run', 'collect', 'publish'):
+            self.assertIn('python3 -B -I .github/scripts/native_ci.py ' + stage + '\n', native)
+        self.assertIn('    timeout-minutes: 90\n', native)
         self.assertIn('ref: ${{ github.event.pull_request.head.sha }}', native)
         self.assertIn('WORKFLOW_SHA: ${{ github.workflow_sha }}', native)
         self.assertIn('WORKFLOW_REF: ${{ github.workflow_ref }}', native)
         self.assertIn('persist-credentials: false', native)
-        self.assertIn('actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803', native)
+        self.assertIn("steps.native-publication.outcome == 'success'", native)
         self.assertIn('  contents: read\n', source)
         self.assertNotIn('pull_request_target', source)
-        for forbidden in ('mise-action', 'upload-artifact', 'always()', 'continue-on-error',
-                          'native_ci.py prepare', 'native_ci.py run', 'native_ci.py collect',
-                          'native_ci.py publish'):
-            self.assertNotIn(forbidden, native)
+        self.assertNotIn('continue-on-error', source)
+
+
+class DirectoryRoleTests(unittest.TestCase):
+    """Portable policy fixtures only: no filesystem creation, native probe or child."""
+    setUp = ACLDiagnosticTests.setUp
+    facts = ACLDiagnosticTests.facts
+    stat_name = ACLDiagnosticTests.stat_name
+    open_fd = ACLDiagnosticTests.open_fd
+    stat_fd = ACLDiagnosticTests.stat_fd
+    getxattr = ACLDiagnosticTests.getxattr
+
+    def chain(self, endpoint, operation):
+        return self.module.trusted_ancestry(endpoint, operation)
+
+    def test_higher_default_only_allows_default_free_creation_parent(self):
+        m = self.module
+        self.values[('/home', 'system.posix_acl_default')] = b'arbitrary uninterpreted template'
+        with mock.patch.object(m, 'os', self.fake), self.chain(m.ROOT.parent, 'create-root') as anchors:
+            self.assertIn(str(m.ROOT.parent), m.revalidate_ancestry(anchors, 'create-root'))
+        self.assertIn(('/home', 'system.posix_acl_access'), self.queries)
+        self.assertIn(('/home', 'system.posix_acl_default'), self.queries)
+
+    def test_access_acl_refuses_at_every_node_and_still_queries_default(self):
+        m = self.module
+        endpoint = m.ROOT / 'tmp'
+        for path in list(reversed(endpoint.parents)) + [endpoint]:
+            with self.subTest(path=path):
+                self.values = {(str(path), 'system.posix_acl_access'): b''}
+                self.queries.clear()
+                with mock.patch.object(m, 'os', self.fake), self.assertRaisesRegex(AssertionError, 'ancestor ACL present:'):
+                    with self.chain(endpoint, 'collector'):
+                        self.fail('access ACL admitted')
+                self.assertIn((str(path), 'system.posix_acl_default'), self.queries)
+
+    def test_both_acls_refuse_on_all_fixed_strict_roles(self):
+        m = self.module
+        endpoints = m.private_directories() | {m.ROOT.parent, m.ROOT.parent / '_runner_file_commands', m.WORK}
+        for endpoint in endpoints:
+            operation = ('create-root' if endpoint == m.ROOT.parent else
+                         'github-env' if endpoint.name == '_runner_file_commands' else
+                         'source-inventory' if endpoint == m.WORK else 'bind')
+            for attribute in m.ACL_DIAGNOSTIC_ATTRIBUTES:
+                with self.subTest(endpoint=endpoint, attribute=attribute):
+                    self.values = {(str(endpoint), attribute): b'present'}
+                    with mock.patch.object(m, 'os', self.fake), self.assertRaisesRegex(AssertionError, 'ancestor ACL present:'):
+                        with self.chain(endpoint, operation):
+                            self.fail('strict ACL admitted')
+
+    def test_strict_roles_remain_strict_as_source_intermediates(self):
+        m = self.module
+        for protected in m.private_directories() | {m.ROOT.parent, m.ROOT.parent / '_runner_file_commands'}:
+            for attribute in m.ACL_DIAGNOSTIC_ATTRIBUTES:
+                with self.subTest(protected=protected, attribute=attribute):
+                    self.values = {(str(protected), attribute): b'present'}
+                    endpoint = protected / 'existing-checkout'
+                    with mock.patch.object(m, 'WORK', endpoint), mock.patch.object(m, 'os', self.fake):
+                        with self.assertRaisesRegex(AssertionError, 'ancestor ACL present:'):
+                            with self.chain(endpoint, 'source-inventory'):
+                                self.fail('intermediate demotion')
+
+    def test_closed_roles_and_endpoint_mismatch_refuse_before_open(self):
+        m = self.module
+        for operation, endpoint in (('waiver', m.ROOT.parent), ('create-root', m.ROOT),
+                                    ('collector', m.LOGS), ('source-inventory', m.ROOT),
+                                    ('output', m.ROOT / 'tmp/negative-input'),
+                                    ('github-env', m.ROOT.parent), ('bind', m.ROOT / 'foreign')):
+            with self.subTest(operation=operation), mock.patch.object(m, 'os', self.fake):
+                with self.assertRaisesRegex(AssertionError, 'unknown directory operation|directory endpoint mismatch'):
+                    with self.chain(endpoint, operation):
+                        self.fail('invalid role admitted')
+        self.assertEqual(self.opens, [])
+
+    def test_creation_parent_acl_and_unknown_child_refuse_before_mkdir(self):
+        m = self.module
+        self.fake.mkdir = mock.Mock()
+        with mock.patch.object(m, 'os', self.fake):
+            for parent, operation in ((m.ROOT.parent, m.create_root),
+                                      (m.ROOT, lambda: m.create_private_directory('upload'))):
+                for attribute in m.ACL_DIAGNOSTIC_ATTRIBUTES:
+                    self.values = {(str(parent), attribute): b'present'}
+                    with self.assertRaisesRegex(AssertionError, 'ancestor ACL present:'):
+                        operation()
+            self.values.clear()
+            with self.assertRaisesRegex(AssertionError, 'unknown private directory'):
+                m.create_private_directory('negative-input')
+        self.fake.mkdir.assert_not_called()
+
+    def test_chain_extension_keeps_parent_strict_and_rejects_wrong_role(self):
+        m = self.module
+        with mock.patch.object(m, 'os', self.fake), self.chain(m.ROOT.parent, 'create-root') as anchors:
+            parent = anchors[-1][2]
+            fd = self.open_fd(m.ROOT.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            initial = {key: getattr(self.stat_fd(fd), 'st_' + key) for key in ('dev', 'ino', 'mode', 'uid', 'gid')}
+            extended = anchors + [(parent, m.ROOT.name, fd, initial, m.ROOT)]
+            m.revalidate_ancestry(extended, 'bind')
+            with self.assertRaisesRegex(AssertionError, 'directory endpoint mismatch'):
+                m.revalidate_ancestry(extended, 'create-root')
+            self.values[(str(m.ROOT.parent), 'system.posix_acl_default')] = b'new template'
+            with self.assertRaisesRegex(AssertionError, 'ancestor ACL present:'):
+                m.revalidate_ancestry(extended, 'bind')
+
+    def test_unknown_unreadable_unsupported_acl_never_means_absent(self):
+        m = self.module
+        for number in (errno.EACCES, errno.EIO, errno.ENOTSUP, errno.ENOENT):
+            for attribute in m.ACL_DIAGNOSTIC_ATTRIBUTES:
+                self.errors = {('/home', attribute): number}
+                with self.subTest(errno=number, attribute=attribute), mock.patch.object(m, 'os', self.fake):
+                    with self.assertRaisesRegex(AssertionError, 'unsupported/unknown ancestor ACL:'):
+                        with self.chain(m.ROOT.parent, 'create-root'):
+                            self.fail('uncertain ACL admitted')
+
+    def test_symlink_owner_and_mode_refuse_without_descendant_open(self):
+        m = self.module
+        original = self.facts
+        for field, value in (('st_mode', 0o120777), ('st_mode', 0o40777), ('st_uid', 2002)):
+            def facts(path):
+                result = original(path)
+                if path == Path('/home'):
+                    setattr(result, field, value)
+                return result
+            self.opens.clear()
+            with self.subTest(field=field, value=value), mock.patch.object(self, 'facts', facts), mock.patch.object(m, 'os', self.fake):
+                with self.assertRaisesRegex(AssertionError, 'unsafe ancestor owner|writable ancestor'):
+                    with self.chain(m.ROOT.parent, 'create-root'):
+                        self.fail('unsafe ancestor admitted')
+            self.assertNotIn(Path('/home/runner'), self.opens)
+
+    def test_identity_and_strict_acl_drift_refuse_on_revalidation(self):
+        m = self.module
+        with mock.patch.object(m, 'os', self.fake), self.chain(m.LOGS, 'export') as anchors:
+            m.require_bindings(anchors, 'export')
+            for drift in ('fd', 'name'):
+                self.drift = drift
+                with self.assertRaisesRegex(AssertionError, 'ancestor (identity|binding) drift'):
+                    m.require_bindings(anchors, 'export')
+            self.drift = None
+            for path in (m.ROOT.parent, m.ROOT, m.LOGS):
+                self.values = {(str(path), 'system.posix_acl_default'): b'drift'}
+                with self.assertRaisesRegex(AssertionError, 'ancestor ACL present:'):
+                    m.require_bindings(anchors, 'export')
+
+    def test_output_read_and_environment_acl_refuse_before_leaf_open(self):
+        m = self.module
+        m.BOUND_DIRECTORIES[str(m.LOGS)] = {}
+        self.fake.write = mock.Mock()
+        operations = ((m.LOGS, lambda: m.PrivateOutput(m.LOGS / 'record', 64)),
+                      (m.LOGS, lambda: m.read_private(m.LOGS / 'record', 64)),
+                      (m.ROOT.parent / '_runner_file_commands', lambda: m.append_github_env({'HOME': 'private'})))
+        for parent, operation in operations:
+            self.values = {(str(parent), 'system.posix_acl_default'): b'present'}
+            with mock.patch.object(m, 'os', self.fake), self.assertRaisesRegex(AssertionError, 'ancestor ACL present:'):
+                operation()
+        self.assertTrue(all(path.name not in ('record', Path(self.environment['GITHUB_ENV']).name) for path in self.opens))
+        self.fake.write.assert_not_called()
+
+    def test_every_ancestry_caller_has_closed_operation_and_matching_rechecks(self):
+        # Source wiring complements the fake-policy matrix; it is not runtime evidence.
+        import ast
+        source = Path(__file__).with_name('native_ci.py').read_text()
+        tree = ast.parse(source)
+        expected = {'PrivateOutput': 'output', 'read_private': 'read', 'bind': 'bind',
+                    'create_root': 'create-root', 'create_private_directory': 'create-private',
+                    'append_github_env': 'github-env', 'worktree_inventory': 'source-inventory',
+                    'preflight': 'preflight', 'upload_inventory': 'upload',
+                    'curate_upload': 'export', 'publish': 'publish', 'collect_evidence': 'collector'}
+        observed = {}
+        for definition in tree.body:
+            if not isinstance(definition, (ast.FunctionDef, ast.ClassDef)) or definition.name not in expected:
+                continue
+            calls = [node for node in ast.walk(definition) if isinstance(node, ast.Call)
+                     and isinstance(node.func, ast.Name)
+                     and node.func.id in ('trusted_ancestry', 'require_bindings', 'revalidate_ancestry')]
+            roles = []
+            for call in calls:
+                self.assertEqual(len(call.args), 2)
+                self.assertIsInstance(call.args[1], ast.Constant)
+                roles.append(call.args[1].value)
+            allowed = {expected[definition.name]}
+            if definition.name in ('create_root', 'create_private_directory'):
+                allowed.add('bind')  # Extended created chain; original parent stays strict.
+            self.assertTrue(roles and set(roles) <= allowed, definition.name)
+            self.assertIn(expected[definition.name], roles)
+            observed[definition.name] = roles
+        self.assertEqual(set(observed), set(expected))
 
 
 class NativeCIPortabilityTests(unittest.TestCase):
