@@ -1,4 +1,104 @@
-# Native Linux acceptance preparation
+# Temporary ACL diagnostic — DRAFT / DO NOT MERGE
+
+**Source preparation only. All new regressions are UNRUN.** This commit is for one
+additional, separately reviewed/local-checked diagnostic attempt, not native
+acceptance. The parent owns all checks, commit/push and the one new PR-synchronize
+run. Run **35548268496, attempt 1 is consumed**; no rerun, retry or policy waiver is
+authorized. Do not merge this temporary workflow or restore operational progression
+without a separate decision.
+
+## Current diagnostic-only contract
+
+`ci.yml` disables `verify` with a literal false job condition while retaining its
+source for later restoration. `native-linux` now has **only pinned candidate-HEAD
+checkout and `native_ci.py diagnose-acl`**. It retains read-only token permission,
+`persist-credentials: false`, same-repository PR routing and exact candidate/workflow
+SHA/ref expressions. Triggers are unchanged. There is no native-job tool acquisition,
+preparation, native test, collector, curation, publication or upload step. The
+operational helper entry points remain source only, unreachable from this route.
+Restore the operational workflow from the reviewed parent baseline only after an
+explicit decision; it is not a fallback in this attempt.
+
+The diagnostic always exits **1**, including when both ACLs are absent everywhere.
+It never calls the operational ancestor policy or grants native filesystem authority.
+`ancestor_policy` and production `internal/nativefs/authority_linux.go` are unchanged.
+No private root, environment-file append, filesystem write, file-content read,
+directory enumeration, arbitrary-xattr read, NSS lookup, subprocess, tool installation,
+timer, signal, ACL change or cleanup is performed by the observer. Interpreter/source
+loading and Actions checkout/platform log activity are distinct from these metadata
+observations; this is not a globally unchanged-filesystem claim.
+
+Only canonical absolute `RUNNER_TEMP` and the fixed
+`RUNNER_TEMP/_runner_file_commands/set_env_<UUID>` environment-file role are accepted.
+Only the former directory's ancestors and **GITHUB_ENV.parent** ancestors are opened,
+never the environment file. Root-first chains are deduplicated. Opens use read-only
+`O_DIRECTORY | O_NOFOLLOW` descriptors from `/`, with nofollow parent-relative name
+stats and current full-chain FD/name comparisons before/after each ACL query.
+Device/inode, numeric UID/GID/mode/link count are reported; mtime/ctime are compared
+internally for drift, not interpreted as permissions. Final binding rechecks are
+observations, not lasting authority. Inaccessible names, errors and drift are unknown;
+descendants of an unavailable binding are not opened.
+
+Only `system.posix_acl_access` and `system.posix_acl_default` are queried by FD.
+ENODATA is recorded separately from errors (numeric errno). Each result stays pending
+until its post-query full-chain check succeeds. Failed checks emit attribute-level
+unknown without that result's bytes, hash, length or presence/absence claim; acquisition
+counters stay charged and earlier validated attributes remain. Validated reads record
+presence, length and SHA256. Complete raw bytes are emitted as hex only when bounded;
+there is **no ACL decoder or permission conclusion**. Every present value, including
+empty or malformed bytes, has unknown/uninterpreted semantics. Complete bytes plus
+numeric process euid/egid/groups permit later offline interpretation. A hash alone,
+omitted bytes, or any observed absence is never policy admission.
+
+| Limit | Diagnostic bound |
+| --- | --- |
+| Paths | 1,024 characters each; canonical syntax; escaped role header at most 4 KiB |
+| Ancestors | 32 unique nodes and depth 32 (including `/`) |
+| ACL input | Linux VFS 64 KiB/value; at most 64 API calls, at most 1 MiB aggregate; reserve one full value before each call |
+| Complete raw bytes | At most 1,028 bytes/value; never emit a truncated prefix |
+| Process groups | At most 128 reported; larger sets explicitly unknown with count |
+| Console | ASCII-escaped compact JSON, at most 16 KiB including terminal failure; records at most 10 KiB |
+| Time | 45-second read-boundary clock; one-minute Actions diagnostic step cap; five-minute outer job cap |
+
+The Python `os.getxattr` API relies on the Linux VFS value bound; non-Linux or missing
+API refuses. Query counts are API calls, not syscall counts. There is no hard-blocked
+filesystem guarantee: checks cannot interrupt a blocked kernel call; the platform
+may terminate the step and lose output. No timers/signals are added. The sole JSON
+result goes to stdout, not files. Node IDs enumerate root-first RUNNER_TEMP ancestry,
+then previously unseen GITHUB_ENV.parent ancestry. `omitted_nodes` identifies records
+excluded by output budget; `missing_attributes` and per-attribute unknown reasons
+identify missing queries/bytes. Full raw values are dropped, never sliced, when console
+budget is exhausted. Fatal setup/observation, serialization or final-console-budget
+failure uses a fixed bounded all-records-missing document. A stdout failure is not
+retried, even after partial output, and never causes a fallback file write.
+
+### Retained failure facts and regression preparation
+
+Attempt 1 refused with `ancestor ACL present: /home`, **before private-root mkdir or
+GITHUB_ENV writes by preparation**. Access is checked first, default second; the old
+message does not identify which ACL was present or its permissions. No permissive
+policy change is justified. The ordinary Ubuntu job and its 81 helper tests passed
+on that attempt; that is useful regression evidence, **not ordered ARM64 acceptance**.
+Native gates, collection, publication and upload were skipped.
+
+The original 81 test purposes and all 14 prior diagnostic purposes are retained:
+**98 prepared definitions**, including three new review-fix definitions, all new
+regressions **UNRUN**. Added portable regressions use the actual
+observer/dispatcher with fake directory FDs, stats, exact xattrs and clock data; no
+native files, live ACL probes or whole-Linux test setup. They prepare read-only flags,
+role/path validation, absent/access/default/malformed data, complete-raw/attribute/
+aggregate/query/node/group/console budgets, escaped output, FD/name/metadata drift,
+inaccessibility, deadlines, nonzero exits, forbidden progression and temporary
+workflow routing. Review fixes add pending present/ENODATA/error drift checks,
+post-read deadline/inaccessibility with prior-attribute preservation, and mocked
+serialization/final-console/partial-stdout terminal failures without file fallback.
+**None has been executed in this source-preparation step.**
+
+## Historical operational preparation (inactive in this diagnostic workflow)
+
+The remainder preserves prior operational design/checkpoint notes for review and
+restoration. Its workflow progression and approval descriptions are historical,
+not permissions or enabled steps in this temporary diagnostic commit.
 
 **This repair is source preparation only; new assertions are UNRUN. No native
 acceptance is claimed.** Publication,
@@ -123,7 +223,7 @@ this repair neither reruns verification nor modifies retained failed fixtures.
 Local/non-Linux checks cannot establish native Linux acceptance or waive its
 capability gates; this prerequisite alone does not establish filesystem support.
 
-Current source inventory: **81 prepared test definitions** (68 Linux-dependent,
+Pre-diagnostic source inventory: **81 prepared test definitions** (68 Linux-dependent,
 11 portable parser, two portable routing/source definitions). All prior 80 purposes
 are retained. The new portable source regression asserts fail-closed mask ordering,
 exact default/native/refusal branches, and unchanged focused usage/forwarding; its

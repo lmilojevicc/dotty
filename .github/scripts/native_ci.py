@@ -1531,7 +1531,206 @@ def collect_evidence():
     return 0
 
 
+# Diagnostic observations never grant ancestor or native filesystem authority.
+ACL_DIAGNOSTIC_ATTRIBUTES = ('system.posix_acl_access', 'system.posix_acl_default')
+ACL_DIAGNOSTIC_NODES = 32
+ACL_DIAGNOSTIC_QUERIES = 64
+ACL_DIAGNOSTIC_ATTRIBUTE_BYTES = 65536
+ACL_DIAGNOSTIC_INPUT_BYTES = 1024 * 1024
+ACL_DIAGNOSTIC_RAW_BYTES = 1028  # Complete raw header + at most 128 entry-sized units; no decoder.
+ACL_DIAGNOSTIC_RECORD_BYTES = 10240
+ACL_DIAGNOSTIC_CONSOLE_BYTES = 16384
+
+
+def acl_diagnostic_json(value):
+    return json.dumps(value, ensure_ascii=True, separators=(',', ':'), sort_keys=True)
+
+
+def acl_diagnostic_plan():
+    targets = {}
+    for role in ('RUNNER_TEMP', 'GITHUB_ENV'):
+        raw = os.environ.get(role, '')
+        if (not raw or len(raw) > 1024 or '\0' in raw or not raw.startswith('/')
+                or raw.startswith('//') or str(Path(raw)) != raw or '..' in Path(raw).parts):
+            raise ValueError('invalid canonical platform path')
+        targets[role] = Path(raw)
+    if (targets['GITHUB_ENV'].parent != targets['RUNNER_TEMP'] / '_runner_file_commands'
+            or not re.fullmatch(r'set_env_[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}',
+                                targets['GITHUB_ENV'].name)):
+        raise ValueError('invalid platform environment role')
+    roles = {'RUNNER_TEMP': str(targets['RUNNER_TEMP']),
+             'GITHUB_ENV.parent': str(targets['GITHUB_ENV'].parent)}
+    if len(acl_diagnostic_json(roles)) > 4096:
+        raise ValueError('target console budget')
+    nodes = []
+    for raw in roles.values():
+        path = Path(raw)
+        if len(path.parts) > ACL_DIAGNOSTIC_NODES:
+            raise ValueError('ancestor depth budget')
+        for ancestor in list(reversed(path.parents)) + [path]:
+            if ancestor not in nodes:
+                nodes.append(ancestor)
+    if len(nodes) > ACL_DIAGNOSTIC_NODES:
+        raise ValueError('unique ancestor budget')
+    return roles, nodes
+
+
+def observe_acl_diagnostic():
+    """Metadata only; IDs enumerate deduplicated root-first role chains, never authority."""
+    if sys.platform != 'linux' or not callable(getattr(os, 'getxattr', None)):
+        raise ValueError('Linux bounded xattr API unavailable')
+    roles, nodes = acl_diagnostic_plan()
+    report = {'diagnostic': 'ancestor-acl', 'native_acceptance': False, 'exit': 1,
+              'targets': roles, 'node_order': 'root-first RUNNER_TEMP then GITHUB_ENV.parent; deduplicated',
+              'nodes': len(nodes), 'records': [], 'omitted_nodes': [], 'queries': 0, 'input_bytes': 0}
+    groups = os.getgroups()
+    report['process'] = {'euid': os.geteuid(), 'egid': os.getegid(), 'group_count': len(groups),
+                         'groups': groups if len(groups) <= 128 else None,
+                         'groups_state': 'observed' if len(groups) <= 128 else 'unknown-budget'}
+    deadline = time.monotonic() + 45
+    anchors, opened, record_bytes = {}, [], 0
+    keys = ('dev', 'ino', 'mode', 'uid', 'gid', 'nlink')
+
+    def boundary():
+        if time.monotonic() >= deadline:
+            raise ValueError('read boundary deadline')
+
+    def metadata(st):
+        return tuple(getattr(st, 'st_' + key) for key in keys + ('mtime_ns', 'ctime_ns'))
+
+    def check_chain(path):
+        for ancestor in list(reversed(path.parents)) + [path]:
+            parent, name, fd, initial = anchors[ancestor]
+            boundary()
+            current = os.fstat(fd)
+            boundary()
+            named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            boundary()
+            if (not stat.S_ISDIR(current.st_mode) or metadata(current) != initial
+                    or metadata(named) != initial):
+                raise ValueError('directory binding drift')
+
+    try:
+        for index, path in enumerate(nodes):
+            record = {'id': index, 'state': 'unknown', 'acl': {}}
+            try:
+                boundary()
+                parent = None
+                if path != Path('/'):
+                    if path.parent not in anchors:
+                        raise ValueError('ancestor unavailable')
+                    check_chain(path.parent)
+                    parent = anchors[path.parent][2]
+                name = '/' if parent is None else path.name
+                boundary()
+                before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                boundary()
+                if not stat.S_ISDIR(before.st_mode):
+                    raise ValueError('non-directory ancestor')
+                fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                opened.append(fd)
+                anchors[path] = (parent, name, fd, metadata(before))
+                check_chain(path)
+                record['stat'] = dict(zip(keys, metadata(before)))
+                for attribute in ACL_DIAGNOSTIC_ATTRIBUTES:
+                    item = {'state': 'unknown'}
+                    record['acl'][attribute] = item
+                    if (report['queries'] >= ACL_DIAGNOSTIC_QUERIES
+                            or report['input_bytes'] + ACL_DIAGNOSTIC_ATTRIBUTE_BYTES > ACL_DIAGNOSTIC_INPUT_BYTES):
+                        item['reason'] = 'query/input-budget'
+                        continue
+                    check_chain(path)
+                    boundary()
+                    report['queries'] += 1
+                    # Acquisition is charged immediately; results remain private until revalidated.
+                    pending = {'state': 'unknown'}
+                    try:
+                        # Linux VFS caps each xattr value at 64 KiB. No listxattr or path lookup.
+                        value = os.getxattr(fd, attribute)
+                    except OSError as error:
+                        pending.update(state='absent' if error.errno == errno.ENODATA else 'unknown',
+                                       errno=error.errno)
+                    else:
+                        pending.update(presence='present', length=len(value))
+                        if len(value) > ACL_DIAGNOSTIC_ATTRIBUTE_BYTES:
+                            pending['reason'] = 'attribute-budget'
+                            # Impossible under the Linux VFS contract; no further queries.
+                            report['input_bytes'] = ACL_DIAGNOSTIC_INPUT_BYTES
+                        else:
+                            report['input_bytes'] += len(value)
+                            pending.update(state='present', sha256=hashlib.sha256(value).hexdigest(),
+                                           interpretation='unknown-uninterpreted')
+                            if len(value) <= ACL_DIAGNOSTIC_RAW_BYTES:
+                                pending['hex'] = value.hex()  # Entire bytes only, never a successful prefix.
+                            else:
+                                pending.update(state='unknown', reason='complete-raw-budget')
+                    try:
+                        check_chain(path)
+                    except (OSError, ValueError, KeyError) as error:
+                        item.update(reason='post-query inaccessible/drift/deadline',
+                                    errno=error.errno if isinstance(error, OSError) else None)
+                        raise
+                    item.update(pending)
+                record['state'] = 'observed'  # Binding observation only, not ACL validity/admission.
+            except (OSError, ValueError, KeyError) as error:
+                record.update(state='unknown', reason='inaccessible/drift/deadline',
+                              errno=error.errno if isinstance(error, OSError) else None)
+                anchors.pop(path, None)  # Descendants cannot proceed using a failed binding.
+            record['missing_attributes'] = [name for name in ACL_DIAGNOSTIC_ATTRIBUTES
+                                            if name not in record['acl']]
+            size = len(acl_diagnostic_json(record))
+            if record_bytes + size > ACL_DIAGNOSTIC_RECORD_BYTES:
+                # Retain hashes/lengths if possible, but explicitly omit entire raw values.
+                for item in record['acl'].values():
+                    if 'hex' in item:
+                        del item['hex']
+                        item.update(state='unknown', reason='console-budget')
+                size = len(acl_diagnostic_json(record))
+            if record_bytes + size <= ACL_DIAGNOSTIC_RECORD_BYTES:
+                report['records'].append(record)
+                record_bytes += size
+            else:
+                report['omitted_nodes'].append(index)
+        # Earlier records do not become enduring bindings. Mark final recheck failures globally.
+        report['final_bindings'] = 'observed' if len(anchors) == len(nodes) else 'unknown-incomplete'
+        try:
+            for path in anchors:
+                check_chain(path)
+        except (OSError, ValueError, KeyError):
+            report['final_bindings'] = 'unknown-drift/inaccessible/deadline'
+    finally:
+        close_errors = 0
+        for fd in reversed(opened):
+            try:
+                os.close(fd)
+            except OSError:
+                close_errors += 1
+        report['close_errors'] = close_errors
+    return report
+
+
+def diagnose_acl():
+    # Separate failure path: no capture, receipt, environment append, or operational fallback.
+    try:
+        report = observe_acl_diagnostic()
+        wire = acl_diagnostic_json(report) + '\n'
+        if len(wire) > ACL_DIAGNOSTIC_CONSOLE_BYTES:
+            raise ValueError('console budget')
+    except Exception:
+        # Fixed bounded document: a failed serializer cannot serialize its own fallback.
+        wire = ('{"diagnostic":"ancestor-acl","exit":1,'
+                '"missing":"all records; observation unavailable or budget exceeded",'
+                '"native_acceptance":false,"state":"unknown"}\n')
+    try:
+        sys.stdout.write(wire)
+    except OSError:
+        pass  # A lost platform stream is not authority to write a fallback file.
+    return 1
+
+
 def dispatch_cli(stage):
+    if stage == 'diagnose-acl':
+        return diagnose_acl()
     try:
         result = {'prepare': prepare, 'run': lambda: capture_stage('main', run),
                   'collect': lambda: collect(capture=True), 'publish': publish}[stage]()
@@ -1544,6 +1743,7 @@ def dispatch_cli(stage):
 
 
 if __name__ == '__main__':
-    os.umask(0o077)
-    assert len(sys.argv) == 2 and sys.argv[1] in ('prepare', 'run', 'collect', 'publish')
+    assert len(sys.argv) == 2 and sys.argv[1] in ('prepare', 'run', 'collect', 'publish', 'diagnose-acl')
+    if sys.argv[1] != 'diagnose-acl':
+        os.umask(0o077)
     sys.exit(dispatch_cli(sys.argv[1]))

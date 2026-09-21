@@ -1,5 +1,8 @@
 """Prepared collector/capture regressions, UNRUN. Private test roots are retained."""
 import importlib.util
+from contextlib import ExitStack
+import io
+from types import SimpleNamespace
 import errno
 import hashlib
 import time
@@ -1273,6 +1276,410 @@ class NativeCITests(unittest.TestCase):
         self.assertIn('journals.tar', {item['name'] for item in manifest['files']})
         self.assertNotIn('collection-checks.json', {item['name'] for item in manifest['files']})
         self.assertEqual((m.LOGS / 'collector.exit').read_bytes(), b'1\n')
+
+
+class ACLDiagnosticTests(unittest.TestCase):
+    """Portable fake descriptors/xattrs only; no native fixture, ACL probe, or child."""
+    def setUp(self):
+        self.environment = {
+            'RUNNER_TEMP': '/home/runner/work/_temp', 'GITHUB_RUN_ID': '1',
+            'GITHUB_RUN_ATTEMPT': '1', 'GITHUB_WORKSPACE': '/checkout',
+            'GITHUB_ENV': '/home/runner/work/_temp/_runner_file_commands/set_env_12345678-1234-1234-1234-123456789abc',
+        }
+        with mock.patch.dict(os.environ, self.environment):
+            self.module = load_source('native_ci_acl_diagnostic_subject', 'native_ci.py')
+        self.descriptors, self.opens, self.stats, self.queries, self.closed = {}, [], [], [], []
+        self.values, self.errors, self.drift = {}, {}, None
+        self.fake = SimpleNamespace(
+            environ=self.environment, O_RDONLY=os.O_RDONLY, O_DIRECTORY=os.O_DIRECTORY,
+            O_NOFOLLOW=os.O_NOFOLLOW, open=self.open_fd, stat=self.stat_name,
+            fstat=self.stat_fd, close=self.closed.append, getxattr=self.getxattr,
+            geteuid=lambda: 1001, getegid=lambda: 1002, getgroups=lambda: [1002, 1003])
+
+    def facts(self, path):
+        # Same fake inode for each stable path; no native metadata observation.
+        return SimpleNamespace(st_dev=1, st_ino=sum(map(ord, str(path))), st_mode=0o40755,
+                               st_uid=0, st_gid=0, st_nlink=2, st_mtime_ns=1, st_ctime_ns=1)
+
+    def stat_name(self, name, *, dir_fd=None, follow_symlinks):
+        self.assertFalse(follow_symlinks)
+        path = Path('/') if dir_fd is None else self.descriptors[dir_fd] / name
+        self.stats.append(path)
+        result = self.facts(path)
+        if self.drift == 'name' and self.queries:
+            result.st_ino += 1
+        return result
+
+    def open_fd(self, name, flags, *, dir_fd=None):
+        self.assertEqual(flags, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        self.assertTrue((name == '/' and dir_fd is None) or
+                        (dir_fd in self.descriptors and '/' not in name))
+        fd = len(self.descriptors) + 10
+        path = Path('/') if dir_fd is None else self.descriptors[dir_fd] / name
+        self.descriptors[fd] = path
+        self.opens.append(path)
+        return fd
+
+    def stat_fd(self, fd):
+        result = self.facts(self.descriptors[fd])
+        if self.drift in ('fd', 'ctime', 'nlink') and self.queries:
+            key = {'fd': 'st_ino', 'ctime': 'st_ctime_ns', 'nlink': 'st_nlink'}[self.drift]
+            setattr(result, key, getattr(result, key) + 1)
+        return result
+
+    def getxattr(self, fd, attribute):
+        self.assertIsInstance(fd, int)
+        self.assertIn(attribute, ('system.posix_acl_access', 'system.posix_acl_default'))
+        key = (str(self.descriptors[fd]), attribute)
+        self.queries.append(key)
+        if key in self.errors:
+            raise OSError(self.errors[key], 'untrusted error text\x1b\n')
+        if key in self.values:
+            return self.values[key]
+        raise OSError(errno.ENODATA, 'absent')
+
+    def diagnose(self, clock=None, **constants):
+        m = self.module
+        output = io.StringIO()
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(m, 'os', self.fake))
+            stack.enter_context(mock.patch.object(m.sys, 'platform', 'linux'))
+            stack.enter_context(mock.patch.object(m.sys, 'stdout', output))
+            stack.enter_context(mock.patch.object(m.time, 'monotonic', return_value=0, side_effect=clock))
+            for name in ('prepare', 'create_root', 'command', 'run', 'collect', 'publish',
+                         'curate_upload', 'append_github_env', 'capture_stage'):
+                forbidden = stack.enter_context(mock.patch.object(m, name, create=True,
+                                                  side_effect=AssertionError('forbidden progression')))
+                self.addCleanup(forbidden.assert_not_called)
+            for name, value in constants.items():
+                stack.enter_context(mock.patch.object(m, name, value))
+            status = m.dispatch_cli('diagnose-acl')
+        wire = output.getvalue()
+        self.assertEqual(status, 1)
+        self.assertLessEqual(len(wire), 16384)
+        self.assertTrue(wire.isascii())
+        self.assertEqual(wire.count('\n'), 1)
+        self.assertNotIn('\x1b', wire)
+        self.assertEqual(sorted(self.closed), sorted(self.descriptors))
+        return json.loads(wire), wire
+
+    def test_absent_observer_is_read_only_deduplicated_and_always_nonzero(self):
+        report, _ = self.diagnose()
+        expected = ['/', '/home', '/home/runner', '/home/runner/work',
+                    '/home/runner/work/_temp', '/home/runner/work/_temp/_runner_file_commands']
+        self.assertEqual(list(map(str, self.opens)), expected)
+        self.assertEqual(report['nodes'], 6)
+        self.assertEqual(report['queries'], 12)
+        self.assertEqual(report['omitted_nodes'], [])
+        self.assertFalse(report['native_acceptance'])
+        self.assertEqual(report['process']['groups'], [1002, 1003])
+        for record in report['records']:
+            self.assertEqual(record['state'], 'observed')
+            self.assertEqual(record['missing_attributes'], [])
+            self.assertEqual(record['stat']['nlink'], 2)
+            self.assertEqual(set(record['acl']), set(self.module.ACL_DIAGNOSTIC_ATTRIBUTES))
+            self.assertTrue(all(item['state'] == 'absent' and item['errno'] == errno.ENODATA
+                                for item in record['acl'].values()))
+        self.assertTrue(all(path.name != Path(self.environment['GITHUB_ENV']).name for path in self.stats))
+
+    def test_access_default_present_and_malformed_are_complete_uninterpreted_bytes(self):
+        access, default = self.module.ACL_DIAGNOSTIC_ATTRIBUTES
+        self.values[('/home', access)] = bytes.fromhex('0200000001000700ffffffff')
+        self.values[('/home', default)] = b'\x1bmalformed\x00'
+        report, _ = self.diagnose()
+        for attribute in (access, default):
+            item = report['records'][1]['acl'][attribute]
+            raw = self.values[('/home', attribute)]
+            self.assertEqual(item['state'], 'present')
+            self.assertEqual(item['interpretation'], 'unknown-uninterpreted')
+            self.assertEqual(bytes.fromhex(item['hex']), raw)
+            self.assertEqual(item['length'], len(raw))
+            self.assertEqual(item['sha256'], hashlib.sha256(raw).hexdigest())
+
+    def test_default_presence_after_access_absence_and_unknown_error(self):
+        access, default = self.module.ACL_DIAGNOSTIC_ATTRIBUTES
+        self.values[('/home', default)] = b''
+        self.errors[('/home/runner', access)] = errno.EACCES
+        report, wire = self.diagnose()
+        self.assertEqual(report['records'][1]['acl'][access]['state'], 'absent')
+        self.assertEqual(report['records'][1]['acl'][default]['hex'], '')
+        self.assertEqual(report['records'][2]['acl'][access]['errno'], errno.EACCES)
+        self.assertEqual(report['records'][2]['acl'][access]['state'], 'unknown')
+        self.assertNotIn('untrusted error text', wire)
+
+    def test_attribute_and_complete_raw_budgets_never_emit_prefixes(self):
+        access, default = self.module.ACL_DIAGNOSTIC_ATTRIBUTES
+        self.values[('/', access)] = b'x' * 1029
+        self.values[('/', default)] = b'x' * 65537  # Impossible native result, injected at API seam.
+        report, _ = self.diagnose()
+        for item in report['records'][0]['acl'].values():
+            self.assertEqual(item['state'], 'unknown')
+            self.assertNotIn('hex', item)
+        self.assertEqual(report['queries'], 2)
+        self.assertEqual(report['records'][1]['acl'][access]['reason'], 'query/input-budget')
+
+    def test_query_input_console_and_group_budgets_report_omissions(self):
+        self.fake.getgroups = lambda: list(range(129))
+        report, _ = self.diagnose(ACL_DIAGNOSTIC_QUERIES=1, ACL_DIAGNOSTIC_RECORD_BYTES=800)
+        self.assertEqual(report['queries'], 1)
+        self.assertTrue(report['omitted_nodes'])
+        self.assertEqual(report['process']['groups_state'], 'unknown-budget')
+        self.assertIsNone(report['process']['groups'])
+        self.assertEqual({r['id'] for r in report['records']} | set(report['omitted_nodes']), set(range(6)))
+
+    def test_aggregate_input_reserves_next_full_attribute(self):
+        access, default = self.module.ACL_DIAGNOSTIC_ATTRIBUTES
+        self.values[('/', access)] = b'x' * 65536
+        report, _ = self.diagnose(ACL_DIAGNOSTIC_INPUT_BYTES=65536)
+        self.assertEqual(report['input_bytes'], 65536)
+        self.assertEqual(report['queries'], 1)
+        self.assertEqual(report['records'][0]['acl'][default]['reason'], 'query/input-budget')
+
+    def test_invalid_canonical_role_and_depth_paths_do_not_open(self):
+        for temp, env in (('/home//temp', self.environment['GITHUB_ENV']),
+                          ('/home/../temp', self.environment['GITHUB_ENV']),
+                          ('/home/temp/', self.environment['GITHUB_ENV']),
+                          ('//home/temp', self.environment['GITHUB_ENV']),
+                          ('relative', self.environment['GITHUB_ENV']),
+                          ('/home/temp', '/outside/set_env_12345678-1234-1234-1234-123456789abc'),
+                          ('/home/temp', '/home/temp/_runner_file_commands/wrong'),
+                          ('/' + '/'.join(['a'] * 33), '/' + '/'.join(['a'] * 33)
+                           + '/_runner_file_commands/set_env_12345678-1234-1234-1234-123456789abc')):
+            with self.subTest(temp=temp, env=env):
+                self.environment.update(RUNNER_TEMP=temp, GITHUB_ENV=env)
+                report, _ = self.diagnose()
+                self.assertEqual(report['state'], 'unknown')
+                self.assertEqual(self.opens, [])
+
+    def test_escaped_target_data_is_not_console_control(self):
+        self.environment['RUNNER_TEMP'] = '/home/\x1b\n\u2603'
+        self.environment['GITHUB_ENV'] = self.environment['RUNNER_TEMP'] + '/_runner_file_commands/set_env_12345678-1234-1234-1234-123456789abc'
+        report, wire = self.diagnose()
+        self.assertEqual(report['targets']['RUNNER_TEMP'], self.environment['RUNNER_TEMP'])
+        self.assertIn('\\u001b', wire)
+        self.assertIn('\\u2603', wire)
+
+    def test_fd_name_and_metadata_drift_prevent_descendant_queries(self):
+        for drift in ('fd', 'name', 'ctime', 'nlink'):
+            with self.subTest(drift=drift):
+                self.drift = drift
+                self.queries.clear()
+                self.opens.clear()
+                self.descriptors.clear()
+                self.closed.clear()
+                report, _ = self.diagnose()
+                self.assertEqual(report['records'][0]['state'], 'unknown')
+                self.assertEqual(len(self.queries), 1)
+                self.assertEqual(list(map(str, self.opens)), ['/'])
+                self.assertTrue(all(r['state'] == 'unknown' for r in report['records']))
+
+    def assert_pending_acl_recheck_failure(self, failure, outcome, prior=False):
+        self.descriptors.clear()
+        self.opens.clear()
+        self.stats.clear()
+        self.queries.clear()
+        self.closed.clear()
+        self.values.clear()
+        self.errors.clear()
+        self.drift = None
+        access, default = self.module.ACL_DIAGNOSTIC_ATTRIBUTES
+        attribute = default if prior else access
+        sentinel = b'failed-query-raw-sentinel\x00\x1b'
+        completed = b'previously-validated-access'
+        if prior:
+            self.values[('/', access)] = completed
+        if outcome == 'present':
+            self.values[('/', attribute)] = sentinel
+        elif outcome == 'error':
+            self.errors[('/', attribute)] = errno.EIO
+        activated = False
+
+        def query(fd, name):
+            nonlocal activated
+            try:
+                return self.getxattr(fd, name)
+            finally:
+                if name == attribute:
+                    activated = True
+                    self.drift = failure
+
+        def stat_fd(fd):
+            if activated and failure == 'inaccessible':
+                raise OSError(errno.EACCES, 'untrusted post-query error\x1b\n')
+            return self.stat_fd(fd)
+
+        self.fake.getxattr = query
+        self.fake.fstat = stat_fd
+        report, wire = self.diagnose(clock=lambda: 46 if activated and failure == 'deadline' else 0)
+        root = report['records'][0]
+        failed = root['acl'][attribute]
+        self.assertEqual(failed, {'state': 'unknown', 'reason': 'post-query inaccessible/drift/deadline',
+                                  'errno': errno.EACCES if failure == 'inaccessible' else None})
+        self.assertNotIn(sentinel.hex(), wire)
+        self.assertNotIn(hashlib.sha256(sentinel).hexdigest(), wire)
+        self.assertNotIn('failed-query-raw-sentinel', wire)
+        self.assertNotIn('untrusted', wire)
+        self.assertNotIn('"state":"absent"', wire)
+        if prior:
+            self.assertEqual(root['acl'][access], {
+                'state': 'present', 'presence': 'present', 'length': len(completed),
+                'sha256': hashlib.sha256(completed).hexdigest(), 'hex': completed.hex(),
+                'interpretation': 'unknown-uninterpreted'})
+        else:
+            self.assertNotIn('"present"', wire)
+            self.assertEqual(root['missing_attributes'], [default])
+        self.assertEqual(report['queries'], 2 if prior else 1)
+        self.assertEqual(len(self.queries), report['queries'])
+        self.assertEqual(report['input_bytes'], (len(completed) if prior else 0)
+                         + (len(sentinel) if outcome == 'present' else 0))
+        self.assertEqual(list(map(str, self.opens)), ['/'])
+        self.assertTrue(all(r['state'] == 'unknown' for r in report['records']))
+        self.assertTrue(all(r['acl'] == {} and r['missing_attributes'] == [access, default]
+                            for r in report['records'][1:]))
+        self.assertEqual(report['final_bindings'], 'unknown-incomplete')
+
+    def test_pending_root_acl_drift_never_serializes_unvalidated_results(self):
+        access = self.module.ACL_DIAGNOSTIC_ATTRIBUTES[0]
+        sentinel = b'failed-query-raw-sentinel\x00\x1b'
+        self.values[('/', access)] = sentinel
+        report, _ = self.diagnose()
+        self.assertEqual(report['records'][0]['acl'][access]['state'], 'present')
+        self.assertEqual(report['records'][0]['acl'][access]['hex'], sentinel.hex())
+        for failure in ('fd', 'name', 'ctime', 'nlink'):
+            for outcome in ('present', 'absent', 'error'):
+                with self.subTest(failure=failure, outcome=outcome):
+                    self.assert_pending_acl_recheck_failure(failure, outcome)
+
+    def test_pending_default_acl_failures_preserve_completed_access(self):
+        for failure in ('fd', 'name', 'ctime', 'nlink', 'deadline', 'inaccessible'):
+            for outcome in ('present', 'absent', 'error'):
+                with self.subTest(failure=failure, outcome=outcome):
+                    self.assert_pending_acl_recheck_failure(failure, outcome, prior=True)
+
+    def test_terminal_serialization_console_and_stdout_failures_never_progress(self):
+        m = self.module
+        expected = {'diagnostic': 'ancestor-acl', 'state': 'unknown', 'exit': 1,
+                    'native_acceptance': False,
+                    'missing': 'all records; observation unavailable or budget exceeded'}
+        for failure in ('serialization', 'console', 'stdout', 'fallback-stdout'):
+            with self.subTest(failure=failure), ExitStack() as stack:
+                output = io.StringIO()
+                writes = []
+
+                def write(wire):
+                    writes.append(wire)
+                    if failure in ('stdout', 'fallback-stdout'):
+                        output.write(wire[:7])  # Simulate a stream failure after partial output.
+                        raise OSError(errno.EIO, 'untrusted stdout failure\x1b\n')
+                    return output.write(wire)
+
+                stack.enter_context(mock.patch.object(m, 'os', self.fake))
+                stack.enter_context(mock.patch.object(m.sys, 'stdout', SimpleNamespace(write=write)))
+                observer = stack.enter_context(mock.patch.object(m, 'observe_acl_diagnostic',
+                    return_value={'diagnostic': 'ancestor-acl', 'native_acceptance': False, 'exit': 1}))
+                serializer = stack.enter_context(mock.patch.object(m, 'acl_diagnostic_json',
+                                                                   wraps=m.acl_diagnostic_json))
+                if failure in ('serialization', 'fallback-stdout'):
+                    serializer.side_effect = ValueError('untrusted serializer failure\x1b\n')
+                elif failure == 'console':
+                    serializer.return_value = 'x' * m.ACL_DIAGNOSTIC_CONSOLE_BYTES
+                forbidden = []
+                for name in ('prepare', 'create_root', 'command', 'run', 'collect', 'publish',
+                             'curate_upload', 'append_github_env', 'capture_stage'):
+                    forbidden.append(stack.enter_context(mock.patch.object(m, name, create=True,
+                        side_effect=AssertionError('forbidden progression'))))
+                forbidden.append(stack.enter_context(mock.patch('builtins.open',
+                    side_effect=AssertionError('fallback file open'))))
+                for name in ('open', 'write_text', 'write_bytes'):
+                    forbidden.append(stack.enter_context(mock.patch.object(Path, name,
+                        side_effect=AssertionError('fallback file write'))))
+                status = m.dispatch_cli('diagnose-acl')
+                self.assertEqual(status, 1)
+                observer.assert_called_once_with()
+                serializer.assert_called_once()
+                for operation in forbidden:
+                    operation.assert_not_called()
+                self.assertEqual(len(writes), 1)
+                self.assertLessEqual(len(writes[0]), m.ACL_DIAGNOSTIC_CONSOLE_BYTES)
+                self.assertTrue(writes[0].isascii())
+                self.assertNotIn('untrusted', writes[0])
+                if failure in ('stdout', 'fallback-stdout'):
+                    self.assertEqual(output.getvalue(), writes[0][:7])
+                else:
+                    self.assertEqual(json.loads(output.getvalue()), expected)
+                    self.assertEqual(output.getvalue().count('\n'), 1)
+                if failure == 'fallback-stdout':
+                    self.assertEqual(json.loads(writes[0]), expected)
+        self.assertEqual(self.opens, [])
+        self.assertEqual(self.queries, [])
+
+    def test_inaccessible_open_and_unavailable_api_stay_nonzero(self):
+        self.fake.open = mock.Mock(side_effect=OSError(errno.EACCES, 'not readable'))
+        report, _ = self.diagnose()
+        self.assertEqual(report['records'][0]['errno'], errno.EACCES)
+        self.assertEqual(report['queries'], 0)
+        self.fake.open = self.open_fd
+        self.fake.getxattr = None
+        report, _ = self.diagnose()
+        self.assertEqual(report['state'], 'unknown')
+        self.assertEqual(self.queries, [])
+
+    def test_read_boundary_deadline_does_not_start_metadata_reads(self):
+        calls = []
+        def clock():
+            calls.append(True)
+            return 0 if len(calls) == 1 else 46
+        report, _ = self.diagnose(clock=clock)
+        self.assertEqual(self.opens, [])
+        self.assertEqual(self.stats, [])
+        self.assertEqual(self.queries, [])
+        self.assertEqual(report['final_bindings'], 'unknown-incomplete')
+        self.assertTrue(all(r['missing_attributes'] == list(self.module.ACL_DIAGNOSTIC_ATTRIBUTES)
+                            for r in report['records']))
+
+    def test_console_budget_omits_whole_raw_data_with_length_and_hash_retained(self):
+        access, default = self.module.ACL_DIAGNOSTIC_ATTRIBUTES
+        self.values[('/', access)] = b'x' * 1028
+        self.values[('/', default)] = b'y' * 1028
+        report, _ = self.diagnose(ACL_DIAGNOSTIC_RECORD_BYTES=1500)
+        for item in report['records'][0]['acl'].values():
+            self.assertNotIn('hex', item)
+            self.assertEqual(item['length'], 1028)
+            self.assertEqual(item['reason'], 'console-budget')
+            self.assertEqual(item['state'], 'unknown')
+            self.assertIn('sha256', item)
+        self.assertTrue(report['omitted_nodes'])
+
+    def test_node_budget_and_unsupported_platform_do_not_open(self):
+        report, _ = self.diagnose(ACL_DIAGNOSTIC_NODES=5)
+        self.assertEqual(report['state'], 'unknown')
+        self.assertEqual(self.opens, [])
+        with mock.patch.object(self.module, 'os', self.fake), \
+                mock.patch.object(self.module.sys, 'platform', 'darwin'):
+            with self.assertRaisesRegex(ValueError, 'Linux bounded xattr API unavailable'):
+                self.module.observe_acl_diagnostic()
+        self.assertEqual(self.opens, [])
+
+    def test_workflow_is_checkout_and_diagnostic_only_with_verify_disabled(self):
+        source = (Path(__file__).resolve().parents[2] / '.github/workflows/ci.yml').read_text()
+        verify, native = source.split('  verify:\n', 1)[1].split('  native-linux:\n', 1)
+        self.assertIn('    if: ${{ false }}\n', verify)
+        self.assertIn('      - name: Run native helper regressions\n', verify)
+        self.assertEqual(native.count('      - name:'), 2)
+        self.assertEqual(native.count('        run:'), 1)
+        self.assertIn('python3 -B -I .github/scripts/native_ci.py diagnose-acl\n', native)
+        self.assertIn('        timeout-minutes: 1\n', native)
+        self.assertIn('ref: ${{ github.event.pull_request.head.sha }}', native)
+        self.assertIn('WORKFLOW_SHA: ${{ github.workflow_sha }}', native)
+        self.assertIn('WORKFLOW_REF: ${{ github.workflow_ref }}', native)
+        self.assertIn('persist-credentials: false', native)
+        self.assertIn('actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803', native)
+        self.assertIn('  contents: read\n', source)
+        self.assertNotIn('pull_request_target', source)
+        for forbidden in ('mise-action', 'upload-artifact', 'always()', 'continue-on-error',
+                          'native_ci.py prepare', 'native_ci.py run', 'native_ci.py collect',
+                          'native_ci.py publish'):
+            self.assertNotIn(forbidden, native)
 
 
 class NativeCIPortabilityTests(unittest.TestCase):
